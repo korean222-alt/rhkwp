@@ -156,10 +156,14 @@ test('missing shared audio has a visible warning', async ({ page }) => {
   await page.getByRole('button', { name: '종료하고 정리하기' }).click();
 });
 
-test('rejected transcription keeps source audio and offers retry after refresh', async ({ page }) => {
+for (const failure of ['worker-error', 'character-loop'] as const) test(`rejected transcription ${failure} keeps source audio and offers retry after refresh`, async ({ page }) => {
+  const warning = failure === 'worker-error' ? '반복 오류로 인식 결과를 확정하지 않았습니다. 원음은 보관됩니다.'
+    : '같은 글자나 짧은 구절이 과도하게 반복되어 인식 결과를 확인해야 합니다. 원음은 삭제하지 않고 보관합니다. 강의 언어를 확인하거나 다른 모델로 바꾼 뒤 저장된 구간을 다시 처리하세요.';
   await page.addInitScript(() => { localStorage.setItem('lens-consent', '1'); localStorage.setItem('lens-settings', JSON.stringify({ schemaVersion: 2, ocr: false, language: 'korean' })); });
   await page.route(/\/(?:assets\/transcriber-[^/]+\.js|src\/workers\/transcriber\.ts)(?:\?|$)/, route => route.fulfill({
-    contentType: 'application/javascript', body: "self.onmessage = () => self.postMessage({ type: 'error', message: '반복 오류로 인식 결과를 확정하지 않았습니다. 원음은 보관됩니다.' });",
+    contentType: 'application/javascript', body: failure === 'worker-error'
+      ? `self.onmessage = () => self.postMessage(${JSON.stringify({ type: 'error', message: warning })});`
+      : "self.onmessage = () => self.postMessage({ type: 'result', chunks: [{ text: '야'.repeat(400), timestamp: [0, 14] }], device: 'wasm' });",
   }));
   await page.goto('/');
   const chooser = page.waitForEvent('filechooser'); await page.getByRole('button', { name: /파일 가져오기/ }).click();
@@ -176,8 +180,23 @@ test('rejected transcription keeps source audio and offers retry after refresh',
   await expect(page.locator('.queue-banner')).toHaveCount(0);
   await page.reload(); await page.getByRole('button', { name: '내 강의', exact: false }).first().click();
   await page.getByRole('button', { name: /korean/ }).click();
-  await expect(page.getByText('반복 오류로 인식 결과를 확정하지 않았습니다. 원음은 보관됩니다.', { exact: true })).toBeVisible();
+  await expect(page.getByText(warning, { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '저장된 구간 다시 처리' })).toBeVisible();
+  if (failure === 'character-loop') {
+    await page.route(/\/(?:assets\/transcriber-[^/]+\.js|src\/workers\/transcriber\.ts)(?:\?|$)/, route => route.fulfill({
+      contentType: 'application/javascript', body: "self.onmessage = () => self.postMessage({ type: 'result', chunks: [{ text: '상대가 무엇을 원하는지 다시 생각해 봅시다.', timestamp: [0, 14] }], device: 'wasm' });",
+    }));
+    await page.getByRole('button', { name: '저장된 구간 다시 처리' }).click();
+    await expect(page.getByText('상대가 무엇을 원하는지 다시 생각해 봅시다.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '저장된 구간 다시 처리' })).toHaveCount(0);
+    const recovered = await page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>(resolve => { const r = indexedDB.open('lecturelens-v1'); r.onsuccess = () => resolve(r.result); });
+      const read = (name: string) => new Promise<unknown[]>(resolve => { const r = db.transaction(name).objectStore(name).getAll(); r.onsuccess = () => resolve(r.result); });
+      const chunks = await read('chunks') as { status: string; samples: Float32Array }[], rows = await read('transcripts'), sessions = await read('sessions') as { status: string; warning?: string }[];
+      db.close(); return { done: chunks.every(c => c.status === 'done'), samples: chunks.reduce((n, c) => n + c.samples.length, 0), transcripts: rows.length, status: sessions[0].status, warning: sessions[0].warning };
+    });
+    expect(recovered).toEqual({ done: true, samples: 0, transcripts: 1, status: 'complete', warning: undefined });
+  }
 });
 test('background tab saves audio and static scenes; mini window controls capture', async ({ baseURL }) => {
   test.setTimeout(120000);

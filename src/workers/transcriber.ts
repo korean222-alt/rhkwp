@@ -111,7 +111,7 @@ self.onmessage = async ({ data }) => {
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     self.postMessage({ type: 'error', message: error instanceof SpeechQualityError
-      ? `${detail} 원음은 삭제하지 않고 보관합니다. 설정에서 강의 언어를 확인하고 base 모델로 바꾼 뒤 저장된 구간을 다시 처리하세요.`
+      ? `${detail} 원음은 삭제하지 않고 보관합니다. 강의 언어를 확인하거나 다른 모델로 바꾼 뒤 저장된 구간을 다시 처리하세요.`
       : `음성 모델 처리에 실패했습니다. ${detail}. 네트워크와 저장 공간을 확인하거나 CPU 모드로 다시 처리하세요.` });
   }
 };

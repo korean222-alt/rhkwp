@@ -1,5 +1,6 @@
 import * as db from './db';
 import type { EngineState, Settings, Transcript } from '../types';
+import { transcriptionIssue } from './speech';
 export class Engine {
   private worker?: Worker;
   private running = false; private stopped = false; private sessionId?: string;
@@ -63,6 +64,9 @@ export class Engine {
         this.report({ phase: 'transcribing', message: `${Math.floor(chunks[0].start / 60)}분 구간의 자막을 만들고 있어요`, progress: undefined });
         try {
           const reply = await this.request({ type: 'transcribe', settings: session.settings, audio }, [audio.buffer]);
+          // Validate again before committing text and releasing its source PCM.
+          const issue = transcriptionIssue(reply.chunks ?? [], duration);
+          if (issue) throw new Error(`${issue} 원음은 삭제하지 않고 보관합니다. 강의 언어를 확인하거나 다른 모델로 바꾼 뒤 저장된 구간을 다시 처리하세요.`);
           const start = chunks[0].start, end = start + duration;
           const rows: Transcript[] = (reply.chunks ?? []).filter(c => c.text.trim()).map((c, i) => ({
             id: `${chunks[0].id}:t${i}`, sessionId: id,

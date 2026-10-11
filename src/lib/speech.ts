@@ -5,9 +5,25 @@ export function chooseLanguage(scores: ArrayLike<number>, koreanId: number, engl
   return scores[koreanId] >= scores[englishId] ? koreanId : englishId;
 }
 
+function hasCharacterLoop(text: string) {
+  // Korean loops need not contain spaces. Normalize composed syllables and
+  // ignore separators so a loop split over timestamp chunks is still caught.
+  const chars = Array.from(text.normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''));
+  for (let width = 1; width <= 12; width++) {
+    const minimum = Math.max(32, width * 8);
+    let matched = 0;
+    for (let i = width; i < chars.length; i++) {
+      matched = chars[i] === chars[i - width] ? matched + 1 : 0;
+      if (matched + width >= minimum) return true;
+    }
+  }
+  return false;
+}
+
 export function transcriptionIssue(chunks: SpeechChunk[], duration: number) {
   const text = chunks.map(c => c.text).join(' ').trim();
   const words = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+  if (hasCharacterLoop(text)) return '같은 글자나 짧은 구절이 과도하게 반복되어 인식 결과를 확인해야 합니다.';
   if (text.length > 300 && text.length / Math.max(1, duration) > 80) return '음성 길이에 비해 자막이 지나치게 깁니다.';
   // Reject sustained loops, not ordinary repeated words or a twice-repeated
   // sentence. Do not silently shorten the output and call it a transcription.

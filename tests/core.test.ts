@@ -99,6 +99,21 @@ describe('saved settings and speech quality', () => {
     for (let i = 1; i < windows.length; i++) expect(windows[i].start).toBeCloseTo(windows[i - 1].start + windows[i - 1].audio.length / 16000);
     expect(windows.every(w => w.audio.length <= 16000 * 6)).toBe(true);
   });
+  it('rejects unspaced syllable loops, including loops surrounded by normal Korean', () => {
+    const row = (text: string) => [{ text, timestamp: [0, 30] as [number, number] }];
+    expect(transcriptionIssue(row('야'.repeat(400)), 30)).toBeTruthy();
+    expect(transcriptionIssue(row('아니면 친구한테 보내줘가지고 ' + '야'.repeat(400) + ' 상대의 분간이 존재한다는 것입니다.'), 30)).toBeTruthy();
+    expect(transcriptionIssue(row('감사합니다'.repeat(20)), 30)).toBeTruthy();
+    expect(transcriptionIssue(row('야'.normalize('NFD').repeat(40)), 30)).toBeTruthy();
+    const split = Array.from({ length: 8 }, (_, i) => ({ text: '야'.repeat(5), timestamp: [i, i + 1] as [number, number] }));
+    expect(transcriptionIssue(split, 30)).toBeTruthy();
+  });
+  it('retains short stutters, laughter and ordinary Korean explanations', () => {
+    const row = (text: string) => [{ text, timestamp: [0, 30] as [number, number] }];
+    expect(transcriptionIssue(row('야야야, 잠깐만. 하하하. 다시 설명해 줄게.'), 8)).toBeUndefined();
+    expect(transcriptionIssue(row('수요와 공급은 가격을 결정합니다. 가격이 오르면 수요량은 줄어들고 공급량은 늘어납니다. 두 곡선이 만나는 곳을 시장 균형이라고 합니다.'), 15)).toBeUndefined();
+    expect(transcriptionIssue(row('이 개념은 중요합니다. '.repeat(2)), 8)).toBeUndefined();
+  });
 });
 describe('local audio capture', () => {
   it('avoids Whisper hallucinations on silence while retaining quiet speech', () => {
