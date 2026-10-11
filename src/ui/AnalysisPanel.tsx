@@ -49,7 +49,7 @@ export function AnalysisPanel({ session, rows }: { session: Session; rows: Trans
   </section><section className="panel settings-section"><h2>강의에 질문하기</h2><label className="sr-only" htmlFor="question">강의 질문</label><textarea id="question" value={question} onChange={e => setQuestion(e.target.value)} rows={4} disabled={busy} />
     <button className="text-link" onClick={() => setPreview(!preview)}><Eye size={16} /> 전송할 자막 확인 {preview ? '닫기' : ''}</button>
     {preview && <pre className="data-preview">{text || '선택한 구간의 자막이 없습니다.'}</pre>}
-    <div className="notice"><ShieldCheck size={20} /><div>이 구간의 자막과 AI가 조회한 OCR이 Anthropic으로 전송됩니다.{images > 0 && ` 선택한 구간의 이미지도 최대 ${images}장 전송합니다.`} 오디오와 영상 원본은 전송하지 않습니다.</div></div>
+    <div className="notice"><ShieldCheck size={20} /><div>이 구간의 자막이 Anthropic으로 전송됩니다.{images > 0 && ` 선택한 구간의 이미지도 최대 ${images}장 전송합니다.`} 오디오와 영상 원본은 전송하지 않습니다.</div></div>
     <label className="check"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} disabled={busy} /> 전송할 자료와 범위를 확인했습니다.</label>
     {busy ? <button className="button secondary" onClick={() => controller.current?.abort()}><Square size={15} /> 분석 취소</button> : <button className="button primary" disabled={!key || !model || !question.trim() || !consent || !validRange || !text} onClick={run}><Send size={16} /> 분석 시작</button>}
     {error && <div role="alert" className="notice warning">{error}</div>}

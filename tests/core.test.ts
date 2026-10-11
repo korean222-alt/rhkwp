@@ -4,6 +4,7 @@ import { runInNewContext } from 'node:vm';
 import { time, parseTime } from '../src/lib/time';
 import { SceneDetector, selectFrame, difference } from '../src/lib/scenes';
 import { hasSpeech } from '../src/lib/vad';
+import { plain, srt } from '../src/lib/transcript';
 import { combined } from '../src/lib/cues';
 import { normalizeSettings } from '../src/lib/settings';
 import { DEFAULT_SETTINGS } from '../src/types';
@@ -38,6 +39,13 @@ describe('scene selection and detection', () => {
     expect(detector.sample(white, 4)).toBeUndefined();
     expect(detector.sample(white, 13)).toBe('periodic');
   });
+  it('reconfigures intervals without inserting a new first scene', () => {
+    const pixels = new Uint8Array(14400).fill(240), detector = new SceneDetector(14, 0, 25);
+    expect(detector.sample(pixels, 0)).toBe('scene');
+    detector.configure(14, 5, 25); expect(detector.sample(pixels, 1)).toBeUndefined();
+    expect(detector.sample(pixels, 5)).toBe('periodic');
+    detector.configure(14, 0, 25); expect(detector.sample(pixels, 100)).toBeUndefined();
+  });
   it('detects text changes spread across a white slide', () => {
     const before = new Uint8Array(14400).fill(255), after = before.slice();
     for (let y = 10; y < 70; y += 15) for (let x = 20; x < 140; x++) for (let h = 0; h < 3; h++) after[(y + h) * 160 + x] = 20;
@@ -63,6 +71,9 @@ describe('saved settings and speech quality', () => {
     const upgraded = normalizeSettings({ language: 'auto', interval: 10, quality: .5, ocr: false });
     expect(upgraded.language).toBe('korean'); expect(upgraded.snapshotMode).toBe('scene');
     expect(upgraded.ignoreBottom).toBe(25); expect(upgraded.quality).toBe(.5); expect(upgraded.ocr).toBe(false);
+    expect(normalizeSettings({ schemaVersion: 2, ocr: true, snapshotMode: 'manual', language: 'auto' }).ocr).toBe(false);
+    expect(normalizeSettings({ schemaVersion: 2, snapshotMode: 'manual', language: 'auto' }).snapshotMode).toBe('manual');
+    expect(normalizeSettings({ autoStopMinutes: 900 }).autoStopMinutes).toBe(120);
     expect(normalizeSettings({ ...DEFAULT_SETTINGS, language: 'auto', snapshotMode: 'manual' }).language).toBe('auto');
     expect(normalizeSettings({ ...DEFAULT_SETTINGS, snapshotMode: 'manual' }).snapshotMode).toBe('manual');
     expect(normalizeSettings({ interval: -20, ignoreBottom: NaN, keywords: ['화면', 2] }).keywords).toEqual(['화면']);
@@ -116,12 +127,15 @@ describe('local audio capture', () => {
   });
 });
 describe('AI-free notes', () => {
-  it('attaches OCR once per scene, never outputs missing image paths', () => {
+  it('attaches image links once per scene, never outputs missing image paths', () => {
     const frames = [{ id: 'a', sec: 0, sceneId: 'a', type: 'scene' as const, ocr: '수요와 공급' }, { id: 'p', sec: 10, sceneId: 'a', type: 'periodic' as const, ocr: '' }, { id: 'b', sec: 20, sceneId: 'b', type: 'scene' as const, ocr: '시장 균형' }];
     const rows = [1, 11, 21].map(start => ({ id: `t${start}`, sessionId: 's', start, end: start + 1, text: '여기 보시면' }));
     const note = combined('강의', rows, frames, ['보시면'], new Set(['a']));
     expect(note.match(/> 화면 단서/g)).toHaveLength(2);
-    expect(note).toContain('수요와 공급'); expect(note).toContain('시장 균형');
+    expect(note).not.toContain('수요와 공급'); expect(note).not.toContain('시장 균형');
+    expect(combined('강의', rows, frames, ['보시면'], new Set(['a']), false)).not.toMatch(/\[00:/);
+    expect(plain(rows, false)).toBe('여기 보시면\n여기 보시면\n여기 보시면');
+    expect(srt(rows)).toContain('00:00:01,000 --> 00:00:02,000');
     expect(note).toContain('frames/0001.jpg'); expect(note).not.toContain('frames/0003.jpg');
   });
 });

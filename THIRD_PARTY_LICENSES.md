@@ -134,7 +134,7 @@
 
 ## Downloaded models
 
-- Whisper tiny/base/small and ONNX exports: MIT. [OpenAI Whisper license](https://github.com/openai/whisper/blob/main/LICENSE), [ONNX Community models](https://huggingface.co/onnx-community). 모델은 배포 ZIP에 포함하지 않으며 최초 사용 시 사용자 기기에 다운로드됩니다.
+- Whisper tiny/base/small/large-v3-turbo and ONNX exports: MIT. [OpenAI Whisper license](https://github.com/openai/whisper/blob/main/LICENSE), [ONNX Community models](https://huggingface.co/onnx-community). 모델은 배포 ZIP에 포함하지 않으며 최초 사용 시 사용자 기기에 다운로드됩니다.
 - Korean / English Tesseract traineddata: Apache-2.0. [tessdata_best](https://github.com/tesseract-ocr/tessdata_best/blob/main/LICENSE).
 - 테스트용 한국어·혼합 음성은 이 프로젝트의 예시 문장을 Windows TTS로 생성한 테스트 자료입니다. 강의 원본이 아닙니다.
 

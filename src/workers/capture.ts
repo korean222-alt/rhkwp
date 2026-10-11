@@ -5,7 +5,7 @@ import type { Frame, Settings } from '../types';
 // needed when the app tab is hidden. Only one source frame is held in memory.
 let latest: VideoFrame | undefined, reader: ReadableStreamDefaultReader<VideoFrame> | undefined;
 let settings: Settings, sessionId: string, detector: SceneDetector;
-let sceneId = crypto.randomUUID(), running = false, paused = false, busy = false;
+let sceneId = crypto.randomUUID(), running = false, paused = false, busy = false, configuring = false;
 let clockOrigin = 0, clockSec = 0, lastSample = -Infinity;
 let pending: Promise<void> = Promise.resolve();
 const now = () => performance.timeOrigin + performance.now();
@@ -13,7 +13,7 @@ const elapsed = () => clockSec + (paused ? 0 : (now() - clockOrigin) / 1000);
 
 async function sample(manual = false) {
   if (!manual && settings.snapshotMode === 'manual') return;
-  if (!latest || busy || paused || !running) return;
+  if (!latest || busy || configuring || paused || !running) return;
   const sec = Math.max(0, elapsed());
   if (!manual && sec - lastSample < .9) return;
   busy = true; lastSample = sec;
@@ -26,23 +26,11 @@ async function sample(manual = false) {
     if (!kind) return;
     if (kind === 'scene') sceneId = crypto.randomUUID();
     const width = latest.displayWidth, height = latest.displayHeight;
-    let snapshot: OffscreenCanvas | undefined, source: OffscreenCanvas | undefined;
-    // Draw both before awaiting encoders so they refer to the same video frame.
-    if (settings.saveImages) {
-      const w = Math.min(settings.width, width);
-      snapshot = new OffscreenCanvas(w, Math.round(w * height / width));
-      snapshot.getContext('2d')!.drawImage(latest, 0, 0, snapshot.width, snapshot.height);
-    }
-    if (settings.ocr && kind !== 'periodic') {
-      const w = Math.min(settings.ocrWidth || 1920, width);
-      source = new OffscreenCanvas(w, Math.round(w * height / width));
-      source.getContext('2d')!.drawImage(latest, 0, 0, source.width, source.height);
-    }
-    const [image, ocrImage] = await Promise.all([
-      snapshot?.convertToBlob({ type: 'image/jpeg', quality: settings.quality }),
-      source?.convertToBlob({ type: 'image/png' }),
-    ]);
-    const frame: Frame = { id: crypto.randomUUID(), sessionId, sceneId, sec, type: kind, image, ocrImage, ocr: '', ocrStatus: source ? 'pending' : 'off' };
+    const w = Math.min(settings.width, width);
+    const snapshot = new OffscreenCanvas(w, Math.round(w * height / width));
+    snapshot.getContext('2d')!.drawImage(latest, 0, 0, snapshot.width, snapshot.height);
+    const image = await snapshot.convertToBlob({ type: 'image/jpeg', quality: settings.quality });
+    const frame: Frame = { id: crypto.randomUUID(), sessionId, sceneId, sec, type: kind, image, ocr: '', ocrStatus: 'off' };
     self.postMessage({ type: 'frame', frame });
   } finally { busy = false; }
 }
@@ -52,7 +40,7 @@ async function readFrames() {
       const result = await reader!.read();
       if (result.done) break;
       latest?.close(); latest = result.value;
-      if (!paused) { pending = sample(); await pending; }
+      if (!paused && !busy && !configuring) { pending = sample(); await pending; }
     }
   } catch (e) {
     if (running) self.postMessage({ type: 'error', message: e instanceof Error ? e.message : String(e) });
@@ -72,6 +60,15 @@ self.onmessage = async ({ data }) => {
       // Static slides may produce no new video frames. Audio blocks still
       // request periodic snapshots from the latest original-resolution frame.
       if (!busy) { pending = sample(); await pending; }
+    }
+    if (data.type === 'configure') {
+      configuring = true;
+      try {
+        await pending;
+        settings = { ...settings, ...data.settings };
+        detector.configure(settings.sceneThreshold, settings.snapshotMode === 'interval' ? settings.interval : 0, settings.ignoreBottom);
+      } finally { configuring = false; }
+      self.postMessage({ type: 'ack', request: data.request });
     }
     if (data.type === 'manual') {
       await pending; pending = sample(true); await pending;

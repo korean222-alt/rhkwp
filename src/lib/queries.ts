@@ -5,13 +5,8 @@ export async function getFrameAt(id: string, timestamp: string | number) {
   const meta = selectFrame(await db.frameMeta(id), parseTime(timestamp));
   return meta ? db.getFrame(meta.id) : undefined;
 }
-export async function getOcrAt(id: string, timestamp: string | number) {
-  const sec = parseTime(timestamp); const all = await db.frameMeta(id);
-  const frame = selectFrame(all, sec);
-  return frame ? all.findLast(f => f.sceneId === frame.sceneId && f.sec <= frame.sec && f.ocr)?.ocr || frame.ocr : '';
-}
 export async function listScenes(id: string, start = 0, end = Infinity) {
-  return (await db.frameMeta(id)).filter(f => f.sec >= start && f.sec <= end && f.type !== 'periodic').map(f => ({ sec: f.sec, time: time(f.sec), ocr: f.ocr, type: f.type }));
+  return (await db.frameMeta(id)).filter(f => f.sec >= start && f.sec <= end && f.type !== 'periodic').map(f => ({ sec: f.sec, time: time(f.sec), type: f.type }));
 }
 export async function getTranscript(id: string, start = 0, end = Infinity) {
   return (await db.transcripts(id)).filter(t => t.end >= start && t.start <= end).map(t => ({ start: t.start, end: t.end, text: t.text }));

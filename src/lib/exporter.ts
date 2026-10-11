@@ -2,9 +2,8 @@ import { Zip, ZipPassThrough, strToU8 } from 'fflate';
 import * as db from './db';
 import { combined, frameFile } from './cues';
 import { time } from './time';
-import type { Transcript } from '../types';
-export const plain = (rows: Transcript[]) => rows.map(r => `[${time(r.start)}] ${r.text}`).join('\n');
-export const srt = (rows: Transcript[]) => rows.map((r, i) => `${i + 1}\n${time(r.start, true)} --> ${time(r.end, true)}\n${r.text}`).join('\n\n');
+import { plain, srt } from './transcript';
+export { plain, srt } from './transcript';
 export function download(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob); const a = document.createElement('a');
   a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
@@ -39,14 +38,14 @@ export async function exportZip(id: string, onProgress: (p: number) => void) {
     for (let i = 0; i < metas.length; i++) {
       const frame = await db.getFrame(metas[i].id);
       if (frame?.image) { add(frameFile(i), new Uint8Array(await frame.image.arrayBuffer())); images.add(frame.id); }
-      scenes.push({ sec: metas[i].sec, time: time(metas[i].sec), file: frame?.image ? frameFile(i) : null, ocr: metas[i].ocr, type: metas[i].type, scene_id: metas[i].sceneId });
+      scenes.push({ sec: metas[i].sec, time: time(metas[i].sec), file: frame?.image ? frameFile(i) : null, type: metas[i].type, scene_id: metas[i].sceneId });
       onProgress(Math.round((i + 1) / Math.max(metas.length, 1) * 90));
       await writeQueue; if (failure) throw failure;
     }
-    add('transcript.txt', strToU8(plain(rows))); add('transcript.srt', strToU8(srt(rows)));
-    add('combined.md', strToU8(combined(session.name, rows, metas, session.settings.keywords, images)));
+    add('transcript.txt', strToU8(plain(rows, session.showTimeline !== false))); add('transcript.srt', strToU8(srt(rows)));
+    add('combined.md', strToU8(combined(session.name, rows, metas, session.settings.keywords, images, session.showTimeline !== false)));
     add('scenes.json', strToU8(JSON.stringify(scenes, null, 2)));
-    add('meta.json', strToU8(JSON.stringify({ app: 'LectureLens', version: '1.0.0', recorded_at: new Date(session.createdAt).toISOString(), duration_sec: session.duration, source: session.source, settings: session.settings, status: session.status, storage_bytes: session.bytes, exported_at: new Date().toISOString() }, null, 2)));
+    add('meta.json', strToU8(JSON.stringify({ app: 'LectureLens', version: '1.1.0', show_timeline: session.showTimeline !== false, recorded_at: new Date(session.createdAt).toISOString(), duration_sec: session.duration, source: session.source, settings: session.settings, status: session.status, storage_bytes: session.bytes, exported_at: new Date().toISOString() }, null, 2)));
     zip.end(); await writeQueue; if (failure) throw failure;
     if (writer) await writer.close(); else download(new Blob(chunks, { type: 'application/zip' }), `${root}.zip`);
     onProgress(100);

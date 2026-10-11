@@ -18,8 +18,14 @@ test('demo → edit → frame query → ZIP → refresh → delete', async ({ pa
   await expect(page.getByRole('heading', { name: '00:00:45의 화면' })).toBeVisible();
   await expect(page.getByRole('img', { name: '00:00:45 스냅샷' })).toBeVisible();
   await page.getByRole('button', { name: '닫기', exact: true }).click();
+  await page.getByRole('switch', { name: '타임라인', exact: true }).click();
+  await expect(page.locator('.timestamp')).toHaveCount(0);
+  const txtDownload = page.waitForEvent('download'); await page.getByRole('button', { name: /^TXT/ }).click();
+  const txtFile = await txtDownload; await txtFile.saveAs('test-results/no-timeline.txt');
+  const { readFile } = await import('node:fs/promises');
+  expect(await readFile('test-results/no-timeline.txt', 'utf8')).not.toMatch(/\[00:/);
   await page.getByRole('tab', { name: '통합 노트' }).click();
-  await expect(page.locator('.combined-note')).toContainText('시장 균형');
+  await expect(page.locator('.combined-note')).toContainText('frames/0002.jpg');
   // Turn off only the native save dialog to exercise the portable ZIP fallback.
   await page.evaluate(() => { (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker = undefined; });
   const dl = page.waitForEvent('download'); await page.getByRole('button', { name: '전체 ZIP 다운로드' }).click();
@@ -28,6 +34,7 @@ test('demo → edit → frame query → ZIP → refresh → delete', async ({ pa
   await page.reload(); await page.getByRole('button', { name: '내 강의', exact: false }).first().click();
   await page.getByRole('button', { name: /경제학 첫걸음/ }).click();
   await expect(page.getByText('이 그래프를 보시면 시장의 균형이 나타납니다.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('switch', { name: '타임라인', exact: true })).toHaveAttribute('aria-checked', 'false');
   await page.getByRole('button', { name: '이 강의 삭제' }).click(); await page.getByRole('button', { name: '강의 삭제', exact: true }).click();
   await expect(page.getByRole('heading', { name: '아직 저장된 강의가 없어요' })).toBeVisible();
   expect(errors).toEqual([]);
@@ -155,17 +162,18 @@ test('rejected transcription keeps source audio and offers retry after refresh',
     contentType: 'application/javascript', body: "self.onmessage = () => self.postMessage({ type: 'error', message: '반복 오류로 인식 결과를 확정하지 않았습니다. 원음은 보관됩니다.' });",
   }));
   await page.goto('/');
-  const chooser = page.waitForEvent('filechooser'); await page.getByRole('button', { name: '파일 가져오기' }).click();
-  await (await chooser).setFiles('tests/fixtures/korean.wav');
+  const chooser = page.waitForEvent('filechooser'); await page.getByRole('button', { name: /파일 가져오기/ }).click();
+  await (await chooser).setFiles(['tests/fixtures/korean.wav', 'tests/fixtures/korean.wav']);
   await expect(page.getByRole('button', { name: '저장된 구간 다시 처리' })).toBeVisible({ timeout: 30000 });
   const saved = await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>(resolve => { const r = indexedDB.open('lecturelens-v1'); r.onsuccess = () => resolve(r.result); });
     const read = (name: string) => new Promise<unknown[]>(resolve => { const r = db.transaction(name).objectStore(name).getAll(); r.onsuccess = () => resolve(r.result); });
     const chunks = await read('chunks') as { status: string; samples: Float32Array }[], rows = await read('transcripts'), sessions = await read('sessions') as { status: string }[];
-    db.close(); return { states: chunks.map(c => c.status), samples: chunks.reduce((n, c) => n + c.samples.length, 0), transcripts: rows.length, status: sessions[0].status };
+    db.close(); return { states: chunks.map(c => c.status), samples: chunks.reduce((n, c) => n + c.samples.length, 0), transcripts: rows.length, status: sessions[0].status, sessionCount: sessions.length };
   });
   expect(saved.states.every(s => s === 'error')).toBe(true); expect(saved.samples).toBeGreaterThan(16000 * 13);
-  expect(saved.transcripts).toBe(0); expect(saved.status).toBe('interrupted');
+  expect(saved.transcripts).toBe(0); expect(saved.status).toBe('interrupted'); expect(saved.sessionCount).toBe(1);
+  await expect(page.locator('.queue-banner')).toHaveCount(0);
   await page.reload(); await page.getByRole('button', { name: '내 강의', exact: false }).first().click();
   await page.getByRole('button', { name: /korean/ }).click();
   await expect(page.getByText('반복 오류로 인식 결과를 확정하지 않았습니다. 원음은 보관됩니다.', { exact: true })).toBeVisible();
@@ -213,12 +221,17 @@ test('background tab saves audio and static scenes; mini window controls capture
   await expect(page.getByRole('button', { name: '계속 녹화' })).toBeVisible();
   await page.evaluate(() => (window as unknown as { documentPictureInPicture: { window: Window } }).documentPictureInPicture.window.close());
   await expect(page.locator('.capture-panel')).toBeVisible();
-  await page.getByRole('button', { name: '계속 녹화' }).click(); await page.getByRole('button', { name: '종료하고 정리하기' }).click();
+  await page.getByRole('button', { name: '계속 녹화' }).click();
+  await page.getByText('녹화 중 촬영 설정 변경', { exact: true }).click();
+  await page.getByRole('switch', { name: '무음 자동 종료·저장', exact: true }).check();
+  await page.getByLabel('무음 자동 종료 시간 (분)', { exact: true }).fill('1');
+  await expect(page.locator('.capture-panel')).toHaveCount(0, { timeout: 15000 });
+  await expect(page.getByText('1분 동안 입력 오디오가 무음으로 감지되어 자동 종료하고 저장했습니다.', { exact: true }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: '전체 ZIP 다운로드' })).toBeEnabled({ timeout: 30000 });
   expect(errors).toEqual([]); await other.close();
   } finally { await browser.close(); }
 });
-test('BYOK sends only to Anthropic and completes an OCR tool loop', async ({ page }) => {
+test('BYOK sends only to Anthropic and completes a transcript tool loop', async ({ page }) => {
   const bodies: Record<string, unknown>[] = []; let requests = 0;
   await page.route('https://api.anthropic.com/**', async route => {
     const req = route.request();
@@ -226,13 +239,13 @@ test('BYOK sends only to Anthropic and completes an OCR tool loop', async ({ pag
     if (req.method() === 'OPTIONS') { await route.fulfill({ status: 204, headers }); return; }
     expect(req.headers()['anthropic-dangerous-direct-browser-access']).toBe('true');
     expect(req.headers()['x-api-key']).toBe('test-key-not-real'); bodies.push(req.postDataJSON()); requests++;
-    const content = requests === 1 ? [{ type: 'tool_use', id: 'toolu_test', name: 'get_ocr', input: { time: '00:00:46' } }] : [{ type: 'text', text: '[00:00:45] 시장 균형은 수요 곡선과 공급 곡선의 교점입니다.' }];
+    const content = requests === 1 ? [{ type: 'tool_use', id: 'toolu_test', name: 'get_transcript', input: { start: 40, end: 80 } }] : [{ type: 'text', text: '[00:00:45] 시장 균형은 수요 곡선과 공급 곡선의 교점입니다.' }];
     await route.fulfill({ status: 200, headers, body: JSON.stringify({ id: `msg_${requests}`, type: 'message', role: 'assistant', model: 'test-model', content, stop_reason: requests === 1 ? 'tool_use' : 'end_turn', stop_sequence: null, usage: { input_tokens: 200, output_tokens: 40 } }) });
   });
   await page.goto('/'); await page.getByRole('button', { name: '예시 강의 둘러보기' }).click(); await page.getByRole('tab', { name: 'AI 분석' }).click();
   await page.getByLabel('Claude API 키', { exact: true }).fill('test-key-not-real'); await page.getByLabel('모델 ID', { exact: true }).fill('test-model');
   await page.getByLabel('전송할 자료와 범위를 확인했습니다.').check(); await page.getByRole('button', { name: '분석 시작', exact: true }).click();
   await expect(page.locator('.answer')).toContainText('시장 균형은 수요 곡선과 공급 곡선의 교점입니다.');
-  expect(requests).toBe(2); expect(JSON.stringify(bodies[1])).toContain('두 곡선의 교점');
+  expect(requests).toBe(2); expect(JSON.stringify(bodies[1])).toContain('시장 균형');
   expect(JSON.stringify(bodies)).not.toContain('base64');
 });

@@ -8,11 +8,12 @@ page.on('pageerror', e => console.log('PAGE ERROR:', e.message));
 const production = process.argv.includes('--production');
 await page.goto(production ? 'http://127.0.0.1:5175/' : 'http://127.0.0.1:5173/');
 const workerUrl = production ? '/assets/' + (await readdir('dist/assets')).find(f => f.startsWith('transcriber-')) : '/src/workers/transcriber.ts';
+const turbo = process.argv.includes('--turbo');
 const mixed = process.argv.includes('--mixed');
 const gpu = process.argv.includes('--gpu');
 const bytes = [...await readFile(mixed ? 'tests/fixtures/mixed.wav' : 'tests/fixtures/korean.wav')];
 const started = Date.now();
-const result = await page.evaluate(async ({ bytes, workerUrl, mixed, gpu }) => {
+const result = await page.evaluate(async ({ bytes, workerUrl, mixed, gpu, turbo }) => {
   const context = new AudioContext();
   const decoded = await context.decodeAudioData(Uint8Array.from(bytes).buffer);
   const offline = new OfflineAudioContext(1, Math.ceil(decoded.duration * 16000), 16000);
@@ -20,7 +21,7 @@ const result = await page.evaluate(async ({ bytes, workerUrl, mixed, gpu }) => {
   const audio = (await offline.startRendering()).getChannelData(0).slice();
   await context.close();
   const worker = new Worker(workerUrl, { type: 'module' });
-  const settings = { model: mixed ? 'base' : 'tiny', device: gpu ? 'auto' : 'wasm', language: mixed ? 'auto' : 'korean' };
+  const settings = { model: turbo ? 'large-v3-turbo' : mixed ? 'base' : 'tiny', device: gpu ? 'auto' : 'wasm', language: mixed ? 'auto' : 'korean' };
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { worker.terminate(); reject(new Error('Model test timed out')); }, 10 * 60000);
     worker.onerror = e => { clearTimeout(timer); reject(new Error(e.message)); };
@@ -30,10 +31,10 @@ const result = await page.evaluate(async ({ bytes, workerUrl, mixed, gpu }) => {
     };
     worker.postMessage({ type: 'transcribe', settings, audio }, [audio.buffer]);
   });
-}, { bytes, workerUrl, mixed, gpu });
+}, { bytes, workerUrl, mixed, gpu, turbo });
 console.log(JSON.stringify({ test: 'real-korean-asr', elapsedMs: Date.now() - started, result }, null, 2));
 await mkdir('qa-results', { recursive: true });
-await writeFile(`qa-results/${gpu ? 'gpu' : mixed ? 'mixed' : 'real'}-asr.json`, JSON.stringify({ elapsedMs: Date.now() - started, result }, null, 2));
+await writeFile(`qa-results/${turbo ? (mixed ? 'turbo-mixed' : 'turbo-korean') : gpu ? 'gpu' : mixed ? 'mixed' : 'real'}-asr.json`, JSON.stringify({ elapsedMs: Date.now() - started, result }, null, 2));
 if (result.type !== 'result' || !result.chunks?.length) throw new Error('Whisper inference failed');
 const transcript = result.chunks.map(c => c.text).join(' ').toLowerCase();
 if (!/[가-힣]/.test(transcript)) throw new Error('Korean audio did not produce Korean text');

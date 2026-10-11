@@ -17,6 +17,10 @@ export class SceneDetector {
   private stable = 0;
   private last = -Infinity;
   constructor(private threshold: number, private interval: number, private ignoreBottom = 0) {}
+  configure(threshold: number, interval: number, ignoreBottom: number) {
+    this.threshold = threshold; this.interval = interval; this.ignoreBottom = ignoreBottom;
+    this.candidate = undefined; this.stable = 0;
+  }
   sample(pixels: Uint8Array, sec: number): 'scene' | 'periodic' | undefined {
     if (!this.reference) { this.reference = pixels; this.last = sec; return 'scene'; }
     if (sceneScore(this.reference, pixels, this.ignoreBottom) >= this.threshold) {
@@ -34,7 +38,7 @@ function sceneScore(a: Uint8Array, b: Uint8Array, ignoreBottom: number) {
   // dropping the two strongest tiles so a moving cursor does not dominate.
   const tiles: number[] = [];
   // Ignore the configured subtitle band for detection only. Stored images and
-  // OCR still use the whole source, including this band.
+  // images still use the whole source, including this band.
   const height = Math.floor(90 * (1 - Math.max(0, Math.min(40, ignoreBottom)) / 100));
   for (let y = 0; y < height; y += 10) for (let x = 0; x < 160; x += 10) {
     let sum = 0;

@@ -1,5 +1,4 @@
 import * as db from './db';
-import { recognize, stopOcr } from './ocr';
 import type { EngineState, Settings, Transcript } from '../types';
 export class Engine {
   private worker?: Worker;
@@ -47,7 +46,6 @@ export class Engine {
     } catch (e) { this.report({ error: e instanceof Error ? e.message : String(e), phase: 'idle', message: '저장된 자료는 유지됩니다. 다시 처리할 수 있어요.' }); }
     finally {
       this.running = false; this.sessionId = undefined;
-      await stopOcr().catch(() => {});
       this.report({ phase: 'idle', progress: undefined }); db.changed();
     }
   }
@@ -82,22 +80,8 @@ export class Engine {
         }
         continue;
       }
-      const frame = await db.nextOcr(id);
-      if (frame && (frame.ocrImage || frame.image)) {
-        this.report({ phase: 'ocr', message: '장면에서 한국어 글자를 읽고 있어요', progress: undefined });
-        try {
-          const text = await recognize((frame.ocrImage || frame.image)!, p => this.report({ progress: p }));
-          await db.updateFrame({ ...frame, ocr: text, ocrStatus: 'done' }, !session.settings.saveImages);
-        } catch {
-          await db.updateFrame({ ...frame, ocrStatus: 'error' });
-          this.report({ error: '일부 장면의 OCR에 실패했습니다. 모델 다운로드 연결을 확인하고 다시 처리하세요. 이미지는 저장되어 있습니다.' });
-          // Avoid repeated failed language downloads for every frame.
-          return;
-        }
-        continue;
-      }
       if (!live && chunks.length === 0) {
-        const errors = stats.errors || (await db.frameMeta(id)).some(f => f.ocrStatus === 'error');
+        const errors = stats.errors;
         await db.patchSession(id, { status: errors ? 'interrupted' : 'complete' });
         this.report({ message: errors ? '실패한 구간을 다시 처리할 수 있어요' : '자막과 장면 정리가 완료됐어요', pending: 0 });
         return;

@@ -1,7 +1,8 @@
+import { hasSpeech } from './vad';
 import { SceneDetector, gray } from './scenes';
 import { saveChunk, saveFrame, patchSession } from './db';
-import type { Session, Frame } from '../types';
-export type CaptureState = { elapsed: number; level: number; paused: boolean; hasAudio: boolean; sourceLabel: string; background: boolean };
+import type { Session, Frame, SnapshotSettings } from '../types';
+export type CaptureState = { elapsed: number; silentSeconds: number; level: number; paused: boolean; hasAudio: boolean; sourceLabel: string; background: boolean };
 export class Recorder {
   private context?: AudioContext;
   private worklet?: AudioWorkletNode;
@@ -14,12 +15,12 @@ export class Recorder {
   private sourceUrl?: string; private wake?: WakeLockSentinel;
   private detector: SceneDetector;
   private sceneId = crypto.randomUUID();
-  private queue = Promise.resolve(); private sceneBusy = false; private stopped = false;
+  private queue = Promise.resolve(); private sceneBusy = false; private stopped = false; private configuring = false;
   private acknowledgements = new Map<string, () => void>();
-  private imported = false;
+  private imported = false; private endingForSilence = false;
   private frameWorker?: Worker; private frameTrack?: MediaStreamTrack;
-  state: CaptureState = { elapsed: 0, level: 0, paused: false, hasAudio: false, sourceLabel: '', background: false };
-  constructor(private session: Session, private onState: (s: CaptureState) => void, private onEnded: () => void, private onError: (e: Error) => void) {
+  state: CaptureState = { elapsed: 0, silentSeconds: 0, level: 0, paused: false, hasAudio: false, sourceLabel: '', background: false };
+  constructor(private session: Session, private onState: (s: CaptureState) => void, private onEnded: (reason?: string) => void, private onError: (e: Error) => void) {
     this.detector = new SceneDetector(session.settings.sceneThreshold, session.settings.snapshotMode === 'interval' ? session.settings.interval : 0, session.settings.ignoreBottom);
   }
   static supported() { return isSecureContext && !!navigator.mediaDevices?.getDisplayMedia && !!window.AudioWorkletNode; }
@@ -109,7 +110,15 @@ export class Recorder {
           id: `${this.session.id}:${data.start.toFixed(5).padStart(16, '0')}`, sessionId: this.session.id,
           start: data.start, duration: samples.length / 16000, samples, status: 'pending',
         }));
+        if (!this.state.paused && !this.stopped) {
+          this.state.silentSeconds = hasSpeech(samples) ? 0 : this.state.silentSeconds + samples.length / 16000;
+        }
         this.frameClock('clock', data.start + samples.length / 16000); this.tick();
+        const minutes = this.session.settings.autoStopMinutes;
+        if (minutes > 0 && this.state.hasAudio && !this.state.paused && !this.stopped && !this.endingForSilence && this.state.silentSeconds >= minutes * 60) {
+          this.endingForSilence = true;
+          this.onEnded(`${minutes}분 동안 입력 오디오가 무음으로 감지되어 자동 종료하고 저장했습니다.`);
+        }
       }
     };
     await context.resume();
@@ -149,7 +158,7 @@ export class Recorder {
   }
   private async sample(manual = false) {
     if (!manual && this.session.settings.snapshotMode === 'manual') return;
-    if (this.sceneBusy || this.stopped || !this.video.videoWidth) return;
+    if (this.sceneBusy || this.configuring || this.stopped || !this.video.videoWidth) return;
     this.sceneBusy = true;
     try {
       const sec = this.state.elapsed;
@@ -160,38 +169,40 @@ export class Recorder {
       if (!kind) return;
       if (kind === 'scene') this.sceneId = crypto.randomUUID();
       const settings = this.session.settings;
-      let image: Blob | undefined, ocrImage: Blob | undefined;
-      if (settings.saveImages) {
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.min(settings.width, this.video.videoWidth);
-        canvas.height = Math.round(canvas.width * this.video.videoHeight / this.video.videoWidth);
-        canvas.getContext('2d')!.drawImage(this.video, 0, 0, canvas.width, canvas.height);
-        image = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error('장면을 이미지로 저장하지 못했습니다.')), 'image/jpeg', settings.quality));
-      }
-      if (settings.ocr && kind !== 'periodic') {
-        const canvas = document.createElement('canvas');
-        // OCR uses an independent lossless source, never the compressed snapshot.
-        canvas.width = Math.min(settings.ocrWidth || 1920, this.video.videoWidth);
-        canvas.height = Math.round(canvas.width * this.video.videoHeight / this.video.videoWidth);
-        canvas.getContext('2d')!.drawImage(this.video, 0, 0, canvas.width, canvas.height);
-        ocrImage = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error('OCR용 화면을 준비하지 못했습니다.')), 'image/png'));
-      }
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.min(settings.width, this.video.videoWidth);
+      canvas.height = Math.round(canvas.width * this.video.videoHeight / this.video.videoWidth);
+      canvas.getContext('2d')!.drawImage(this.video, 0, 0, canvas.width, canvas.height);
+      const image = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error('장면을 이미지로 저장하지 못했습니다.')), 'image/jpeg', settings.quality));
       const frame: Frame = {
         id: crypto.randomUUID(), sessionId: this.session.id, sceneId: this.sceneId, sec, type: kind,
-        image, ocrImage, ocr: '', ocrStatus: settings.ocr && kind !== 'periodic' ? 'pending' : 'off',
+        image, ocr: '', ocrStatus: 'off',
       };
-      if (!settings.saveImages && frame.ocrStatus === 'off') frame.image = undefined;
       this.enqueue(() => saveFrame(frame));
     } finally { this.sceneBusy = false; }
   }
-  private async frameRequest(type: 'manual' | 'stop') {
+  private async frameRequest(type: 'manual' | 'stop' | 'configure', settings?: SnapshotSettings) {
     if (!this.frameWorker) return;
     const request = crypto.randomUUID();
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => { this.acknowledgements.delete(request); reject(new Error('화면 저장 응답이 늦어지고 있습니다.')); }, 5000);
       this.acknowledgements.set(request, () => { clearTimeout(timeout); resolve(); });
-      this.frameWorker!.postMessage({ type, request });
+      this.frameWorker!.postMessage({ type, request, settings });
     });
+  }
+  async updateSnapshots(patch: Partial<SnapshotSettings>) {
+    if (this.stopped) throw new Error('녹화가 종료되었습니다.');
+    const settings = { ...this.session.settings, ...patch };
+    // Only snapshot preferences are accepted; speech processing stays unchanged.
+    const { snapshotMode, ignoreBottom, sceneThreshold, interval, width, quality, autoStopMinutes } = settings;
+    const next = { snapshotMode, ignoreBottom, sceneThreshold, interval, width, quality, autoStopMinutes };
+    if (this.frameWorker) await this.frameRequest('configure', next);
+    this.configuring = true;
+    while (this.sceneBusy) await new Promise(resolve => setTimeout(resolve, 20));
+    this.session.settings = { ...this.session.settings, ...next };
+    this.detector.configure(sceneThreshold, snapshotMode === 'interval' ? interval : 0, ignoreBottom);
+    this.configuring = false;
+    await patchSession(this.session.id, { settings: this.session.settings });
   }
   async snapshot() { if (this.frameWorker) await this.frameRequest('manual'); else await this.sample(true); await this.queue; }
   private async flush(type: 'flush' | 'pause') {

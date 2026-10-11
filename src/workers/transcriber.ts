@@ -15,12 +15,13 @@ async function load(settings: Settings) {
   const nextIdentity = `${settings.model}:${settings.device}`;
   if (transcriber && identity === nextIdentity) return;
   if (transcriber) { await transcriber.dispose(); transcriber = undefined; }
-  device = !avoidGpu && settings.device === 'auto' && 'gpu' in navigator && await (navigator as Navigator & { gpu: { requestAdapter(): Promise<unknown> } }).gpu.requestAdapter() ? 'webgpu' : 'wasm';
+  const adapter = !avoidGpu && settings.device === 'auto' && 'gpu' in navigator ? await (navigator as Navigator & { gpu: { requestAdapter(): Promise<{ features: { has(name: string): boolean } } | null> } }).gpu.requestAdapter() : null;
+  device = !avoidGpu && adapter ? 'webgpu' : 'wasm';
   const progress_callback = (p: { status: string; progress?: number; file?: string }) => self.postMessage({ type: 'progress', message: p.file || 'Whisper 모델 준비', progress: p.progress });
   const model = `onnx-community/whisper-${settings.model}`;
   try {
     transcriber = await pipeline<'automatic-speech-recognition'>('automatic-speech-recognition', model, {
-      device: device as 'wasm' | 'webgpu', dtype: device === 'webgpu' ? { encoder_model: 'fp32', decoder_model_merged: 'q4' } : 'q8', progress_callback,
+      device: device as 'wasm' | 'webgpu', dtype: device === 'wasm' ? 'q8' : settings.model === 'large-v3-turbo' ? (adapter?.features.has('shader-f16') ? 'q4f16' : 'q4') : { encoder_model: 'fp32', decoder_model_merged: 'q4' }, progress_callback,
     });
   } catch (error) {
     if (device !== 'webgpu') throw error;
