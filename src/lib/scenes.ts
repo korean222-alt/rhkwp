@@ -16,29 +16,33 @@ export class SceneDetector {
   private candidate?: Uint8Array;
   private stable = 0;
   private last = -Infinity;
-  constructor(private threshold: number, private interval: number) {}
+  constructor(private threshold: number, private interval: number, private ignoreBottom = 0) {}
   sample(pixels: Uint8Array, sec: number): 'scene' | 'periodic' | undefined {
     if (!this.reference) { this.reference = pixels; this.last = sec; return 'scene'; }
-    if (sceneScore(this.reference, pixels) >= this.threshold) {
-      if (this.candidate && sceneScore(this.candidate, pixels) < this.threshold / 2) this.stable++;
+    if (sceneScore(this.reference, pixels, this.ignoreBottom) >= this.threshold) {
+      if (this.candidate && sceneScore(this.candidate, pixels, this.ignoreBottom) < this.threshold / 2) this.stable++;
       else this.stable = 0;
       this.candidate = pixels;
       if (this.stable >= 1) { this.reference = pixels; this.candidate = undefined; this.last = sec; return 'scene'; }
     } else { this.candidate = undefined; this.stable = 0; }
-    if (sec - this.last >= this.interval) { this.last = sec; return 'periodic'; }
+    if (this.interval > 0 && sec - this.last >= this.interval) { this.last = sec; return 'periodic'; }
   }
 }
-function sceneScore(a: Uint8Array, b: Uint8Array) {
+function sceneScore(a: Uint8Array, b: Uint8Array, ignoreBottom: number) {
   if (a.length !== b.length || a.length !== 14400) return difference(a, b);
   // White slides often change only their text. Focus on changed tiles while
   // dropping the two strongest tiles so a moving cursor does not dominate.
   const tiles: number[] = [];
-  for (let y = 0; y < 90; y += 10) for (let x = 0; x < 160; x += 10) {
+  // Ignore the configured subtitle band for detection only. Stored images and
+  // OCR still use the whole source, including this band.
+  const height = Math.floor(90 * (1 - Math.max(0, Math.min(40, ignoreBottom)) / 100));
+  for (let y = 0; y < height; y += 10) for (let x = 0; x < 160; x += 10) {
     let sum = 0;
-    for (let dy = 0; dy < 10; dy++) for (let dx = 0; dx < 10; dx++) {
+    const tileHeight = Math.min(10, height - y);
+    for (let dy = 0; dy < tileHeight; dy++) for (let dx = 0; dx < 10; dx++) {
       const i = (y + dy) * 160 + x + dx; sum += Math.abs(a[i] - b[i]);
     }
-    tiles.push(sum / 100);
+    tiles.push(sum / (10 * tileHeight));
   }
   const changed = tiles.sort((a, b) => b - a).slice(2, 34);
   return changed.reduce((s, v) => s + v, 0) / changed.length;

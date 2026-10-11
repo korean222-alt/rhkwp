@@ -75,6 +75,8 @@ export class Engine {
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e);
           await db.failChunks(chunks, message); this.report({ error: message });
+          const current = await db.getSession(id);
+          if (current) await db.patchSession(id, { warning: message, ...(['recording', 'importing'].includes(current.status) ? {} : { status: 'interrupted' as const }) });
           // Stop retrying a broken model on every chunk; preserve future audio.
           return;
         }

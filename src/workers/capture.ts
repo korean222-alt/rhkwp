@@ -12,6 +12,7 @@ const now = () => performance.timeOrigin + performance.now();
 const elapsed = () => clockSec + (paused ? 0 : (now() - clockOrigin) / 1000);
 
 async function sample(manual = false) {
+  if (!manual && settings.snapshotMode === 'manual') return;
   if (!latest || busy || paused || !running) return;
   const sec = Math.max(0, elapsed());
   if (!manual && sec - lastSample < .9) return;
@@ -61,7 +62,7 @@ self.onmessage = async ({ data }) => {
   try {
     if (data.type === 'init') {
       settings = data.settings; sessionId = data.sessionId; clockOrigin = data.clockOrigin; clockSec = data.sec;
-      detector = new SceneDetector(settings.sceneThreshold, settings.interval);
+      detector = new SceneDetector(settings.sceneThreshold, settings.snapshotMode === 'interval' ? settings.interval : 0, settings.ignoreBottom);
       reader = (data.readable as ReadableStream<VideoFrame>).getReader(); running = true;
       self.postMessage({ type: 'ready' }); void readFrames();
     }

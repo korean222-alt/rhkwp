@@ -5,6 +5,9 @@ import { time, parseTime } from '../src/lib/time';
 import { SceneDetector, selectFrame, difference } from '../src/lib/scenes';
 import { hasSpeech } from '../src/lib/vad';
 import { combined } from '../src/lib/cues';
+import { normalizeSettings } from '../src/lib/settings';
+import { DEFAULT_SETTINGS } from '../src/types';
+import { chooseLanguage, transcriptionIssue, audioWindows } from '../src/lib/speech';
 describe('timeline accuracy', () => {
   it('keeps millisecond carry and hour boundaries', () => {
     expect(time(59.9996, true)).toBe('00:01:00,000');
@@ -40,6 +43,50 @@ describe('scene selection and detection', () => {
     for (let y = 10; y < 70; y += 15) for (let x = 20; x < 140; x++) for (let h = 0; h < 3; h++) after[(y + h) * 160 + x] = 20;
     const detector = new SceneDetector(14, 10); detector.sample(before, 0);
     expect(detector.sample(after, 1)).toBeUndefined(); expect(detector.sample(after, 2)).toBe('scene');
+  });
+  it('saves no periodic snapshots or subtitle-only changes in scene mode', () => {
+    const slide = new Uint8Array(14400).fill(240);
+    const detector = new SceneDetector(14, 0, 25);
+    expect(detector.sample(slide, 0)).toBe('scene');
+    for (let sec = 1; sec <= 70; sec++) {
+      const caption = slide.slice();
+      caption.fill(sec % 2 ? 0 : 100, 70 * 160);
+      expect(detector.sample(caption, sec)).toBeUndefined();
+    }
+    const changed = slide.slice(); changed.fill(30, 0, 60 * 160);
+    expect(detector.sample(changed, 71)).toBeUndefined();
+    expect(detector.sample(changed, 72)).toBe('scene');
+  });
+});
+describe('saved settings and speech quality', () => {
+  it('upgrades old automatic-English and periodic defaults without losing image preferences', () => {
+    const upgraded = normalizeSettings({ language: 'auto', interval: 10, quality: .5, ocr: false });
+    expect(upgraded.language).toBe('korean'); expect(upgraded.snapshotMode).toBe('scene');
+    expect(upgraded.ignoreBottom).toBe(25); expect(upgraded.quality).toBe(.5); expect(upgraded.ocr).toBe(false);
+    expect(normalizeSettings({ ...DEFAULT_SETTINGS, language: 'auto', snapshotMode: 'manual' }).language).toBe('auto');
+    expect(normalizeSettings({ ...DEFAULT_SETTINGS, snapshotMode: 'manual' }).snapshotMode).toBe('manual');
+    expect(normalizeSettings({ interval: -20, ignoreBottom: NaN, keywords: ['화면', 2] }).keywords).toEqual(['화면']);
+  });
+  it('selects Korean or English from acoustic scores and rejects invalid scores', () => {
+    expect(chooseLanguage([-1, 3], 1, 0)).toBe(1);
+    expect(chooseLanguage([4, 1], 1, 0)).toBe(0);
+    expect(() => chooseLanguage([NaN, 1], 0, 1)).toThrow();
+  });
+  it('rejects the attached runaway loops while retaining normal repetitions', () => {
+    const row = (text: string) => [{ text, timestamp: [0, 30] as [number, number] }];
+    expect(transcriptionIssue(row('social and '.repeat(60)), 30)).toBeTruthy();
+    expect(transcriptionIssue(row('players who are in a relationship with the '.repeat(30)), 30)).toBeTruthy();
+    expect(transcriptionIssue(row('이 개념은 중요합니다. '.repeat(2) + '앞에서 살펴본 수요와 공급을 다시 설명하겠습니다.'), 12)).toBeUndefined();
+    expect(transcriptionIssue(row('The price rises, then falls. The price rises, then falls. This example shows a market cycle.'), 12)).toBeUndefined();
+  });
+  it('splits mixed audio without losing samples or shifting the timeline', () => {
+    const audio = new Float32Array(16000 * 15).fill(.1); audio.fill(0, 16000 * 4, 16000 * 4.5);
+    const windows = audioWindows(audio, 6);
+    expect(windows[0].audio.length / 16000).toBeGreaterThanOrEqual(4);
+    expect(windows[0].audio.length / 16000).toBeLessThanOrEqual(4.5);
+    expect(windows.reduce((n, w) => n + w.audio.length, 0)).toBe(audio.length);
+    for (let i = 1; i < windows.length; i++) expect(windows[i].start).toBeCloseTo(windows[i - 1].start + windows[i - 1].audio.length / 16000);
+    expect(windows.every(w => w.audio.length <= 16000 * 6)).toBe(true);
   });
 });
 describe('local audio capture', () => {

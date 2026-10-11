@@ -20,7 +20,7 @@ export class Recorder {
   private frameWorker?: Worker; private frameTrack?: MediaStreamTrack;
   state: CaptureState = { elapsed: 0, level: 0, paused: false, hasAudio: false, sourceLabel: '', background: false };
   constructor(private session: Session, private onState: (s: CaptureState) => void, private onEnded: () => void, private onError: (e: Error) => void) {
-    this.detector = new SceneDetector(session.settings.sceneThreshold, session.settings.interval);
+    this.detector = new SceneDetector(session.settings.sceneThreshold, session.settings.snapshotMode === 'interval' ? session.settings.interval : 0, session.settings.ignoreBottom);
   }
   static supported() { return isSecureContext && !!navigator.mediaDevices?.getDisplayMedia && !!window.AudioWorkletNode; }
   async screen(stream: MediaStream) {
@@ -148,6 +148,7 @@ export class Recorder {
     this.onState({ ...this.state });
   }
   private async sample(manual = false) {
+    if (!manual && this.session.settings.snapshotMode === 'manual') return;
     if (this.sceneBusy || this.stopped || !this.video.videoWidth) return;
     this.sceneBusy = true;
     try {

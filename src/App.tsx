@@ -7,6 +7,7 @@ import { Recorder, type CaptureState } from './lib/recorder';
 import { size, time } from './lib/time';
 import { createDemo } from './lib/demo';
 import { DEFAULT_SETTINGS, type EngineState, type Session, type Settings } from './types';
+import { normalizeSettings } from './lib/settings';
 import { SettingsPanel } from './ui/SettingsPanel';
 import { SessionDetail } from './ui/SessionDetail';
 import { CaptureMini } from './ui/CaptureMini';
@@ -15,9 +16,7 @@ type View = 'home' | 'library' | 'settings' | 'help';
 function readSettings(): Settings {
   try {
     const parsed = JSON.parse(localStorage.getItem('lens-settings') || '{}');
-    const settings = { ...DEFAULT_SETTINGS, ...parsed };
-    if (!['tiny', 'base', 'small'].includes(settings.model) || !Array.isArray(settings.keywords)) return DEFAULT_SETTINGS;
-    return settings;
+    return normalizeSettings(parsed);
   } catch { return DEFAULT_SETTINGS; }
 }
 export default function App() {
@@ -156,7 +155,7 @@ export default function App() {
   };
   return <div className="app-shell"><aside className="sidebar"><button className="brand" onClick={() => navigate('home')} aria-label="LectureLens 홈"><span className="brand-mark">L<i /></span><span>Lecture<span className="brand-light">Lens</span></span></button><span className="sidebar-caption">내 학습 공간</span>
     <nav aria-label="주 메뉴">{[{ id: 'home', title: '시작하기', icon: LayoutDashboard }, { id: 'library', title: '내 강의', icon: FolderOpen }, { id: 'settings', title: '설정', icon: Settings2 }].map(n => <button key={n.id} className={`nav-item ${view === n.id && !selected ? 'active' : ''}`} onClick={() => navigate(n.id as View)}><n.icon size={19} /><span>{n.title}</span>{n.id === 'library' && <small>{sessions.length}</small>}</button>)}</nav>
-    <button className="sidebar-new" onClick={() => navigate('home')}><Plus size={18} /> 새 강의 정리</button><div className="sidebar-bottom"><div className="local-card"><div><ShieldCheck size={19} /><strong>내 기기에서 처리</strong></div><p>강의 자료는 이 브라우저에<br />안전하게 보관됩니다.</p><span className="tiny">{size(storage.usage ?? 0)} 사용{storage.quota ? ` / ${size(storage.quota)}` : ''}</span><div className="storage-bar"><i style={{ width: `${Math.max(2, Math.min(100, (storage.usage ?? 0) / (storage.quota || 1) * 100))}%` }} /></div></div><button className="nav-item" onClick={() => navigate('help')}><CircleHelp size={18} /> 사용 가이드</button><div className="version">LectureLens <span>v1.0</span></div></div>
+    <button className="sidebar-new" onClick={() => navigate('home')}><Plus size={18} /> 새 강의 정리</button><div className="sidebar-bottom"><div className="local-card"><div><ShieldCheck size={19} /><strong>내 기기에서 처리</strong></div><p>강의 자료와 모델은<br />이 브라우저의 디스크에 보관돼요.</p><span className="tiny" title="브라우저 디스크 사용량입니다. 처리 중 사용하는 RAM 용량과는 다릅니다.">{size(storage.usage ?? 0)} 사용{storage.quota ? ` / ${size(storage.quota)}` : ''}</span><div className="storage-bar"><i style={{ width: `${Math.max(2, Math.min(100, (storage.usage ?? 0) / (storage.quota || 1) * 100))}%` }} /></div></div><button className="nav-item" onClick={() => navigate('help')}><CircleHelp size={18} /> 사용 가이드</button><div className="version">LectureLens <span>v1.0</span></div></div>
   </aside><main><header className="topbar"><div className="breadcrumbs">워크스페이스 <ChevronRight size={14} /> <strong>{selected ? '강의 노트' : { home: '시작하기', library: '내 강의', settings: '설정', help: '사용 가이드' }[view]}</strong></div><div className="local-pill"><i /> 로컬 처리 <ShieldCheck size={14} /></div></header>
     {toast && <div className="toast" role="alert"><Info size={19} /><p>{toast}</p><button className="icon-button" onClick={() => setToast('')} aria-label="알림 닫기"><X size={18} /></button></div>}
     {engineState.error && engineState.error !== toast && <div className="engine-alert notice warning"><Info size={17} /><div>{engineState.error}</div></div>}
@@ -187,6 +186,8 @@ function LectureCard({ session: s, open }: { session: Session; open: () => void 
 function Help() {
   return <div className="page narrow"><div className="page-title"><div className="eyebrow">A LITTLE GUIDANCE</div><h1>처음부터, 차근차근</h1><p>설치 없이 강의를 학습 자료로 정리할 수 있습니다.</p></div><section className="panel settings-section"><h2>화면 녹화 → 자료 다운로드</h2><ol className="help-steps"><li><strong>PC Chrome 또는 Edge에서 강의를 엽니다.</strong><p>이 앱과 강의 탭을 함께 열어 두세요. 모바일에서는 화면 공유가 지원되지 않을 수 있습니다.</p></li><li><strong>「화면 녹화 시작」을 누릅니다.</strong><p>「Chrome 탭」에서 강의 탭을 선택하고 「탭 오디오 공유」를 체크하세요. 창이나 전체 화면의 오디오 지원은 OS에 따라 다릅니다.</p></li><li><strong>소리 레벨을 확인하고 강의를 재생합니다.</strong><p>「작은 상태 창」을 열면 다른 프로그램을 사용하면서도 녹화를 제어할 수 있습니다. 앱과 강의 탭은 닫지 마세요. F9는 앱에 포커스가 있을 때 동작하며, 작은 창의 「장면 저장」도 사용할 수 있습니다.</p></li><li><strong>「종료하고 정리하기」를 누릅니다.</strong><p>남은 자막과 OCR이 완료되면 전체 ZIP을 받으세요. combined.md에 화면 글자가 포함됩니다.</p></li></ol></section><section className="panel settings-section"><h2>알아 두면 좋은 점</h2>{[
     ['첫 모델 준비에는 인터넷이 필요해요', '음성 모델과 OCR 언어 데이터를 다운로드합니다. 모델은 브라우저 캐시에 보관되지만 브라우저가 공간 확보를 위해 삭제할 수 있습니다. 강의 자료를 서버에 업로드하지 않습니다.'],
+    ['컴퓨터를 껐다 켜도 저장한 자료는 남아요', '같은 브라우저와 같은 주소로 접속하면 디스크에 저장된 강의를 다시 볼 수 있습니다. 브라우저 데이터 삭제나 저장 공간 정리로 지워질 수 있으니 중요한 결과는 ZIP으로 보관하세요. 처리 중에는 음성 모델과 현재 작업 자료가 RAM도 사용합니다.'],
+    ['사진은 기본으로 장면 전환 때만 찍어요', '처음 화면과 안정된 화면 전환만 저장합니다. 하단 25%는 자막 영역으로 보고 변화 감지에서 제외합니다. 제외 범위는 설정에서 조절할 수 있습니다. 움직임이 많은 영상은 「자동 촬영 → 끄기」를 선택하고 필요한 장면만 직접 저장하세요.'],
     ['새로고침 후에는 저장된 구간을 이어 처리해요', '녹화 소스는 다시 공유해야 합니다. 내 강의에서 「저장된 구간 다시 처리」를 누르면 저장된 오디오와 장면을 처리합니다. 새로고침 직전 최대 5초는 저장되지 않았을 수 있습니다.'],
     ['파일 가져오기는 실제 재생 속도로 진행돼요', 'MP4, WebM, WAV, MP3 등 브라우저가 재생하는 코덱을 지원합니다. 긴 파일도 한 번에 메모리에 풀지 않도록 순차 처리합니다. 파일의 오디오가 없으면 자막이 생성되지 않습니다.'],
     ['화면이 검게 보이면 보호된 영상일 수 있어요', '복제 방지나 DRM을 우회하지 않습니다. 검은 화면은 그대로 저장됩니다.'],

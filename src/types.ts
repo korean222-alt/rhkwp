@@ -1,11 +1,14 @@
 export type ModelSize = 'tiny' | 'base' | 'small';
 export type Settings = {
+  schemaVersion: 2;
   model: ModelSize; device: 'auto' | 'wasm'; language: 'auto' | 'korean' | 'english';
+  snapshotMode: 'scene' | 'interval' | 'manual'; ignoreBottom: number;
   sceneThreshold: number; interval: number; width: number; quality: number;
   saveImages: boolean; ocr: boolean; ocrWidth: number; keywords: string[];
 };
 export const DEFAULT_SETTINGS: Settings = {
-  model: 'tiny', device: 'auto', language: 'auto', sceneThreshold: 14,
+  schemaVersion: 2, model: 'tiny', device: 'auto', language: 'korean', sceneThreshold: 14,
+  snapshotMode: 'scene', ignoreBottom: 25,
   interval: 10, width: 960, quality: 0.7, saveImages: true, ocr: true, ocrWidth: 1920,
   keywords: ['보시면', '보이시죠', '이 그래프', '이 그림', '이 표', '여기', '화면', '슬라이드', '아래에', '위에', '다음 페이지', '예시'],
 };

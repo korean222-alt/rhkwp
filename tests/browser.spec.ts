@@ -1,4 +1,7 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, chromium } from '@playwright/test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve, sep } from 'node:path';
 import { realBrowser } from './real-browser';
 test('demo → edit → frame query → ZIP → refresh → delete', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
@@ -29,17 +32,84 @@ test('demo → edit → frame query → ZIP → refresh → delete', async ({ pa
   await expect(page.getByRole('heading', { name: '아직 저장된 강의가 없어요' })).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('lecture data survives Chrome closing and reopening with the same profile', async ({ baseURL }) => {
+  const profile = await mkdtemp(join(tmpdir(), 'lecturelens-restart-'));
+  let context = await chromium.launchPersistentContext(profile, { channel: 'chrome', headless: true });
+  try {
+    const page = context.pages()[0]; await page.goto(baseURL!);
+    await page.getByRole('button', { name: '예시 강의 둘러보기' }).click();
+    await expect(page.getByRole('heading', { name: '경제학 첫걸음 · 수요와 공급' })).toBeVisible();
+    await page.getByRole('button', { name: '00:00:46 자막 수정' }).click();
+    await page.getByRole('textbox', { name: '자막 수정', exact: true }).fill('브라우저를 다시 열어도 남는 자막입니다.');
+    await page.getByRole('button', { name: '저장', exact: true }).click();
+    await expect(page.getByText('브라우저를 다시 열어도 남는 자막입니다.', { exact: true })).toBeVisible();
+    await context.close();
+    context = await chromium.launchPersistentContext(profile, { channel: 'chrome', headless: true });
+    const reopened = context.pages()[0]; await reopened.goto(baseURL!);
+    await reopened.getByRole('button', { name: '내 강의', exact: false }).first().click();
+    await reopened.getByRole('button', { name: /경제학 첫걸음/ }).click();
+    await expect(reopened.getByText('브라우저를 다시 열어도 남는 자막입니다.', { exact: true })).toBeVisible();
+  } finally {
+    await context.close();
+    const target = resolve(profile), allowed = resolve(tmpdir()) + sep + 'lecturelens-restart-';
+    if (!target.startsWith(allowed)) throw new Error('Unexpected restart test profile path');
+    await rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  }
+});
 test('responsive settings and analysis consent', async ({ page }) => {
+  await page.addInitScript(() => { if (!localStorage.getItem('lens-settings')) localStorage.setItem('lens-settings', JSON.stringify({ interval: 10, language: 'auto', width: 640 })); });
   await page.goto('/'); await page.getByRole('button', { name: '설정', exact: true }).click();
+  await expect(page.getByLabel('강의 언어', { exact: true })).toHaveValue('korean');
+  await expect(page.getByLabel('자동 촬영', { exact: true })).toHaveValue('scene');
+  await expect(page.getByLabel('자막 영역 감지 제외', { exact: true })).toHaveValue('25');
+  await expect(page.getByLabel('주기 스냅샷 간격', { exact: true })).toHaveCount(0);
+  await page.getByLabel('자동 촬영', { exact: true }).selectOption('interval');
+  await expect(page.getByLabel('주기 스냅샷 간격', { exact: true })).toHaveValue('10');
+  await page.getByLabel('자동 촬영', { exact: true }).selectOption('manual');
   await page.getByRole('button', { name: /base 정확도/ }).click();
   await page.reload(); await page.getByRole('button', { name: '설정', exact: true }).click();
   await expect(page.getByRole('button', { name: /base 정확도/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByLabel('자동 촬영', { exact: true })).toHaveValue('manual');
   await page.getByRole('button', { name: '시작하기', exact: true }).click(); await page.getByRole('button', { name: '예시 강의 둘러보기' }).click();
   await page.getByRole('tab', { name: 'AI 분석' }).click();
   await expect(page.getByRole('button', { name: '분석 시작', exact: true })).toBeDisabled();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: 'test-results/mobile.png', fullPage: true });
+});
+
+for (const mode of ['scene', 'manual'] as const) test(`snapshot ${mode}: subtitles do not trigger photos; manual capture works`, async ({ page }) => {
+  await page.addInitScript(mode => {
+    localStorage.setItem('lens-consent', '1');
+    localStorage.setItem('lens-settings', JSON.stringify({ schemaVersion: 2, ocr: false, snapshotMode: mode }));
+    Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { value: async () => {
+      const canvas = document.createElement('canvas'); canvas.width = 1280; canvas.height = 720;
+      const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#fafbf6'; ctx.fillRect(0, 0, 1280, 720);
+      ctx.fillStyle = '#234c32'; ctx.font = '36px sans-serif'; ctx.fillText('Stable lecture slide', 50, 100);
+      let caption = 0;
+      setInterval(() => { ctx.fillStyle = '#222'; ctx.fillRect(0, 600, 1280, 120); ctx.fillStyle = 'white'; ctx.fillText(`Changing subtitle ${caption++}`, 120, 660); }, 700);
+      (window as unknown as { changeSlide: () => void }).changeSlide = () => { ctx.fillStyle = '#345'; ctx.fillRect(0, 0, 1280, 540); };
+      const video = canvas.captureStream(2), audio = new AudioContext();
+      const destination = audio.createMediaStreamDestination(), silence = audio.createConstantSource();
+      silence.offset.value = 0; silence.connect(destination); silence.start(); await audio.resume();
+      return new MediaStream([...video.getVideoTracks(), ...destination.stream.getAudioTracks()]);
+    } });
+  }, mode);
+  const count = () => page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>(resolve => { const r = indexedDB.open('lecturelens-v1'); r.onsuccess = () => resolve(r.result); });
+    const rows = await new Promise<{ type: string }[]>(resolve => { const r = db.transaction('frames').objectStore('frames').getAll(); r.onsuccess = () => resolve(r.result); });
+    db.close(); return rows.map(r => r.type);
+  });
+  await page.goto('/'); await page.getByRole('button', { name: '화면 녹화 시작' }).click();
+  await expect(page.locator('.capture-panel')).toBeVisible(); await page.waitForTimeout(12000);
+  expect(await count()).toEqual(mode === 'scene' ? ['scene'] : []);
+  await page.evaluate(() => (window as unknown as { changeSlide: () => void }).changeSlide());
+  if (mode === 'scene') await expect.poll(async () => (await count()).length).toBe(2);
+  else { await page.waitForTimeout(2500); expect(await count()).toEqual([]); }
+  await page.keyboard.press('F9'); await expect.poll(async () => (await count()).filter(t => t === 'manual').length).toBe(1);
+  await page.getByRole('button', { name: '종료하고 정리하기' }).click();
+  await expect(page.getByRole('button', { name: '전체 ZIP 다운로드' })).toBeEnabled();
 });
 test('screen + silent audio worklet → pause → manual snapshot → finish', async ({ page }) => {
   await page.addInitScript(() => {
@@ -78,6 +148,29 @@ test('missing shared audio has a visible warning', async ({ page }) => {
   await expect(page.getByText('소리가 공유되지 않았습니다.', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: '종료하고 정리하기' }).click();
 });
+
+test('rejected transcription keeps source audio and offers retry after refresh', async ({ page }) => {
+  await page.addInitScript(() => { localStorage.setItem('lens-consent', '1'); localStorage.setItem('lens-settings', JSON.stringify({ schemaVersion: 2, ocr: false, language: 'korean' })); });
+  await page.route(/\/(?:assets\/transcriber-[^/]+\.js|src\/workers\/transcriber\.ts)(?:\?|$)/, route => route.fulfill({
+    contentType: 'application/javascript', body: "self.onmessage = () => self.postMessage({ type: 'error', message: '반복 오류로 인식 결과를 확정하지 않았습니다. 원음은 보관됩니다.' });",
+  }));
+  await page.goto('/');
+  const chooser = page.waitForEvent('filechooser'); await page.getByRole('button', { name: '파일 가져오기' }).click();
+  await (await chooser).setFiles('tests/fixtures/korean.wav');
+  await expect(page.getByRole('button', { name: '저장된 구간 다시 처리' })).toBeVisible({ timeout: 30000 });
+  const saved = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>(resolve => { const r = indexedDB.open('lecturelens-v1'); r.onsuccess = () => resolve(r.result); });
+    const read = (name: string) => new Promise<unknown[]>(resolve => { const r = db.transaction(name).objectStore(name).getAll(); r.onsuccess = () => resolve(r.result); });
+    const chunks = await read('chunks') as { status: string; samples: Float32Array }[], rows = await read('transcripts'), sessions = await read('sessions') as { status: string }[];
+    db.close(); return { states: chunks.map(c => c.status), samples: chunks.reduce((n, c) => n + c.samples.length, 0), transcripts: rows.length, status: sessions[0].status };
+  });
+  expect(saved.states.every(s => s === 'error')).toBe(true); expect(saved.samples).toBeGreaterThan(16000 * 13);
+  expect(saved.transcripts).toBe(0); expect(saved.status).toBe('interrupted');
+  await page.reload(); await page.getByRole('button', { name: '내 강의', exact: false }).first().click();
+  await page.getByRole('button', { name: /korean/ }).click();
+  await expect(page.getByText('반복 오류로 인식 결과를 확정하지 않았습니다. 원음은 보관됩니다.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '저장된 구간 다시 처리' })).toBeVisible();
+});
 test('background tab saves audio and static scenes; mini window controls capture', async ({ baseURL }) => {
   test.setTimeout(120000);
   const browser = await realBrowser(), { context, page } = browser;
@@ -110,7 +203,7 @@ test('background tab saves audio and static scenes; mini window controls capture
     return { duration: sessions[0].duration, frames: frames.length, frameTimes: frames.map(f => f.sec).sort((a,b) => a-b) };
   });
   console.log('Hidden-tab persistence:', stored);
-  expect(stored.duration).toBeGreaterThanOrEqual(60); expect(stored.frames).toBeGreaterThanOrEqual(11);
+  expect(stored.duration).toBeGreaterThanOrEqual(60); expect(stored.frames).toBe(1);
   await page.bringToFront(); await page.getByRole('button', { name: '작은 상태 창' }).click();
   await page.waitForFunction(() => !!(window as unknown as { documentPictureInPicture: { window?: Window } }).documentPictureInPicture.window?.document.querySelector('.mini-clock'));
   await page.evaluate(() => {
