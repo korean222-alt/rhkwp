@@ -3,6 +3,7 @@ import type { CaptureState } from '../lib/recorder';
 import { SnapshotControls } from './SnapshotControls';
 import type { EngineState, Settings, SnapshotSettings } from '../types';
 import { time } from '../lib/time';
+import { AdBanner } from './AdBanner';
 export function CaptureMini({ capture, engine, busy, toggle, snapshot, stop, settings, snapshotUpdate, snapshotBusy, lectures, activeId, choose }: {
   capture: CaptureState; engine: EngineState; busy: boolean;
   toggle: () => void; snapshot: () => void; stop: () => void; settings: Settings; snapshotUpdate: (patch: Partial<SnapshotSettings>) => void; snapshotBusy: boolean;
@@ -20,5 +21,6 @@ export function CaptureMini({ capture, engine, busy, toggle, snapshot, stop, set
     <SnapshotControls compact settings={settings} update={snapshotUpdate} busy={snapshotBusy || busy} />
     <p className="mini-hint">강의 창이 가려지거나 최소화되면 영상이 검게 캡처될 수 있습니다. 원본 영상이 보이게 두고 확인하세요.</p>
     <p className="mini-hint">이 창을 닫아도 녹화는 계속됩니다. 원래 앱 탭은 열어 두세요.</p>
+    <AdBanner compact />
   </main>;
 }

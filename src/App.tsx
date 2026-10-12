@@ -14,6 +14,7 @@ import { SettingsPanel } from './ui/SettingsPanel';
 import { SessionDetail } from './ui/SessionDetail';
 import { CaptureMini } from './ui/CaptureMini';
 import { CaptureDeck } from './ui/CaptureDeck';
+import { AdBanner } from './ui/AdBanner';
 const ImageText = lazy(() => import('./ui/ImageText'));
 const statusText = { recording: '녹화 중', importing: '가져오는 중', interrupted: '이어 처리 가능', processing: '처리 대기', complete: '정리 완료' };
 type View = 'home' | 'library' | 'settings' | 'help' | 'image-text';
@@ -222,6 +223,7 @@ export default function App() {
       {view === 'image-text' && <Suspense fallback={<div className="page">이미지 변환 도구를 여는 중…</div>}><ImageText /></Suspense>}
       {view === 'help' && <Help />}
     </>}
+    <AdBanner />
     <footer className="app-footer"><span>LectureLens</span><a href="/third-party-notices.txt" target="_blank" rel="noreferrer">오픈소스 고지</a><p>더 가볍게 정리하고, 더 깊이 이해하세요.</p><span><ShieldCheck size={13} /> 내 기기 우선</span></footer>
   </main><input className="sr-only" type="file" multiple ref={fileInput} accept="video/mp4,video/webm,video/quicktime,audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/ogg,.mp4,.webm,.wav,.mp3,.m4a,.ogg" onChange={e => { const files = [...(e.target.files || [])]; if (files.length) requestFiles(files); e.target.value = ''; }} aria-label="강의 파일 선택" />
     {miniHost && miniCapture && createPortal(<CaptureMini capture={miniCapture.state} engine={engineState} busy={miniCapture.busy} settings={miniCapture.settings} snapshotUpdate={patch => updateCapture(miniCapture.id, patch)} snapshotBusy={miniCapture.busy} toggle={() => toggleCapture(miniCapture.id)} snapshot={() => takeSnapshot(miniCapture.id)} stop={() => void stop(miniCapture.id)} lectures={captures.map(c => ({ id: c.id, name: c.name }))} activeId={miniCapture.id} choose={setMiniId} />, miniHost)}
