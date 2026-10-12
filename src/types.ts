@@ -34,5 +34,6 @@ export type Frame = {
 export type EngineState = {
   phase: 'idle' | 'model' | 'transcribing'; message: string;
   progress?: number; pending: number; error?: string; device?: string;
+  sessionId?: string;
 };
 export type SnapshotSettings = Pick<Settings, 'snapshotMode' | 'ignoreBottom' | 'sceneThreshold' | 'interval' | 'width' | 'quality' | 'autoStopMinutes'>;

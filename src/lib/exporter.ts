@@ -45,7 +45,7 @@ export async function exportZip(id: string, onProgress: (p: number) => void) {
     add('transcript.txt', strToU8(plain(rows, session.showTimeline !== false))); add('transcript.srt', strToU8(srt(rows)));
     add('combined.md', strToU8(combined(session.name, rows, metas, session.settings.keywords, images, session.showTimeline !== false)));
     add('scenes.json', strToU8(JSON.stringify(scenes, null, 2)));
-    add('meta.json', strToU8(JSON.stringify({ app: 'LectureLens', version: '1.1.1', show_timeline: session.showTimeline !== false, recorded_at: new Date(session.createdAt).toISOString(), duration_sec: session.duration, source: session.source, settings: session.settings, status: session.status, storage_bytes: session.bytes, exported_at: new Date().toISOString() }, null, 2)));
+    add('meta.json', strToU8(JSON.stringify({ app: 'LectureLens', version: '1.2.0', show_timeline: session.showTimeline !== false, recorded_at: new Date(session.createdAt).toISOString(), duration_sec: session.duration, source: session.source, settings: session.settings, status: session.status, storage_bytes: session.bytes, exported_at: new Date().toISOString() }, null, 2)));
     zip.end(); await writeQueue; if (failure) throw failure;
     if (writer) await writer.close(); else download(new Blob(chunks, { type: 'application/zip' }), `${root}.zip`);
     onProgress(100);

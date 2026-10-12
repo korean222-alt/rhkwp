@@ -2,7 +2,7 @@ import { hasSpeech } from './vad';
 import { SceneDetector, gray } from './scenes';
 import { saveChunk, saveFrame, patchSession } from './db';
 import type { Session, Frame, SnapshotSettings } from '../types';
-export type CaptureState = { elapsed: number; silentSeconds: number; level: number; paused: boolean; hasAudio: boolean; sourceLabel: string; background: boolean };
+export type CaptureState = { elapsed: number; silentSeconds: number; level: number; paused: boolean; hasAudio: boolean; sourceLabel: string; background: boolean; isTab: boolean };
 export class Recorder {
   private context?: AudioContext;
   private worklet?: AudioWorkletNode;
@@ -19,7 +19,7 @@ export class Recorder {
   private acknowledgements = new Map<string, () => void>();
   private imported = false; private endingForSilence = false;
   private frameWorker?: Worker; private frameTrack?: MediaStreamTrack;
-  state: CaptureState = { elapsed: 0, silentSeconds: 0, level: 0, paused: false, hasAudio: false, sourceLabel: '', background: false };
+  state: CaptureState = { elapsed: 0, silentSeconds: 0, level: 0, paused: false, hasAudio: false, sourceLabel: '', background: false, isTab: false };
   constructor(private session: Session, private onState: (s: CaptureState) => void, private onEnded: (reason?: string) => void, private onError: (e: Error) => void) {
     this.detector = new SceneDetector(session.settings.sceneThreshold, session.settings.snapshotMode === 'interval' ? session.settings.interval : 0, session.settings.ignoreBottom);
   }
@@ -31,6 +31,7 @@ export class Recorder {
     const audio = stream.getAudioTracks();
     this.state.hasAudio = audio.length > 0;
     this.state.sourceLabel = stream.getVideoTracks()[0]?.label || '공유한 화면';
+    this.state.isTab = stream.getVideoTracks()[0]?.getSettings().displaySurface === 'browser';
     if (audio.length) {
       this.context = new AudioContext();
       await this.setup(this.context.createMediaStreamSource(new MediaStream(audio)));

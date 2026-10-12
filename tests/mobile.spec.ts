@@ -1,0 +1,21 @@
+import { test, expect } from '@playwright/test';
+test('390px without screen sharing offers file import and exports a timeline-free TXT', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => { localStorage.setItem('lens-consent', '1'); Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { value: undefined }); });
+  await page.route(/\/(?:assets\/transcriber-[^/]+\.js|src\/workers\/transcriber\.ts)(?:\?|$)/, route => route.fulfill({ contentType: 'application/javascript', body: "self.onmessage = ({data}) => self.postMessage({ type: 'result', chunks: [{ text: '모바일에서 영상 파일을 가져왔습니다.', timestamp: [0, data.audio.length / 16000] }], device: 'wasm' });" }));
+  await page.goto('/'); await expect(page.getByText('모바일은 녹화한 영상 파일로 시작하세요', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '화면 녹화 시작' })).toBeDisabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: '../lecturelens-mobile.png', fullPage: true });
+  const chooser = page.waitForEvent('filechooser'); await page.getByRole('button', { name: /파일 가져오기/ }).click(); await (await chooser).setFiles('tests/fixtures/korean.wav');
+  await expect(page.getByText('모바일에서 영상 파일을 가져왔습니다.', { exact: true })).toBeVisible({ timeout: 30000 });
+  await expect(page.getByRole('button', { name: '전체 ZIP 다운로드' })).toBeEnabled();
+  await page.getByRole('switch', { name: '타임라인', exact: true }).click();
+  const download = page.waitForEvent('download'); await page.getByRole('button', { name: /^TXT/ }).click();
+  const file = await download; await file.saveAs('test-results/mobile-transcript.txt');
+  const { readFile } = await import('node:fs/promises'); expect(await readFile('test-results/mobile-transcript.txt', 'utf8')).toBe('모바일에서 영상 파일을 가져왔습니다.');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: '설정', exact: true }).click();
+  await expect(page.getByRole('button', { name: /tiny 가볍게/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('처음 준비하거나 인식할 때 선택한 모델을 브라우저에 다운로드합니다.', { exact: false })).toBeVisible();
+});
