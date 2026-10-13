@@ -17,7 +17,7 @@
     "licenses": "node scripts/licenses.mjs"
   },
   "dependencies": {
-    "@huggingface/transformers": "3.8.1",
+    "@huggingface/transformers": "4.3.1",
     "@ai-sdk/anthropic": "4.0.78",
     "ai": "7.0.137",
     "fflate": "0.8.2",
