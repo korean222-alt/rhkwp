@@ -1,8 +1,10 @@
 import { SnapshotControls } from './SnapshotControls';
 import { Download, SlidersHorizontal } from 'lucide-react';
 import type { EngineState, Settings, SnapshotSettings } from '../types';
-export function SettingsPanel({ settings: s, update, prepare, engine, busy, snapshotUpdate, snapshotBusy, recording }: {
+import type { ReactNode } from 'react';
+export function SettingsPanel({ settings: s, update, prepare, engine, busy, snapshotUpdate, snapshotBusy, recording, children }: {
   settings: Settings; update: (s: Settings) => void; prepare: () => void; engine: EngineState; busy: boolean; snapshotUpdate: (patch: Partial<SnapshotSettings>) => void; snapshotBusy: boolean; recording: boolean;
+  children?: ReactNode;
 }) {
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => update({ ...s, [key]: value });
   return <div className="page narrow"><div className="page-title"><div className="eyebrow">MAKE IT YOURS</div><h1>내 강의에 맞게</h1><p>음성 모델과 언어는 다음 강의에 적용됩니다. 촬영 설정은 녹화 중에도 바꿀 수 있습니다.</p></div>
@@ -21,6 +23,7 @@ export function SettingsPanel({ settings: s, update, prepare, engine, busy, snap
       <SnapshotControls settings={s} update={snapshotUpdate} busy={snapshotBusy} />
       <p className="small">강의 화면의 글자를 자동으로 읽지 않습니다. 필요한 스크린샷은 「이미지 → TXT」에서 직접 변환하세요.</p>
     </section>
-    <section className="panel settings-section"><h2>화면 단서 키워드</h2><p className="muted">이 말이 나온 시점의 저장된 화면 링크를 통합 노트에 붙입니다. 쉼표로 구분하세요.</p><textarea rows={4} value={s.keywords.join(', ')} onChange={e => set('keywords', e.target.value.split(',').map(v => v.trim()))} aria-label="화면 단서 키워드" /><div className="tag-list">{s.keywords.filter(Boolean).slice(0, 15).map((k, i) => <span key={`${k}:${i}`} className="tag">{k}</span>)}</div></section>
+    <section className="panel settings-section"><h2>화면 단서 키워드</h2><p className="muted">이 말이 나온 시점의 저장된 화면 링크를 통합 노트에 붙입니다. 쉼표로 구분하세요.</p><textarea disabled={busy} rows={4} value={s.keywords.join(', ')} onChange={e => set('keywords', e.target.value.split(',').map(v => v.trim()))} aria-label="화면 단서 키워드" /><div className="tag-list">{s.keywords.filter(Boolean).slice(0, 15).map((k, i) => <span key={`${k}:${i}`} className="tag">{k}</span>)}</div></section>
+    {children}
   </div>;
 }

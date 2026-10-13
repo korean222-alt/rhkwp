@@ -32,7 +32,7 @@ test('demo → edit → frame query → ZIP → refresh → delete', async ({ pa
   const file = await dl; expect(file.suggestedFilename()).toContain('.zip');
   await file.saveAs('test-results/demo.zip');
   await page.reload(); await page.getByRole('button', { name: '내 강의', exact: false }).first().click();
-  await page.getByRole('button', { name: /경제학 첫걸음/ }).click();
+  await page.getByRole('button', { name: /경제학 첫걸음.*강의 열기/ }).click();
   await expect(page.getByText('이 그래프를 보시면 시장의 균형이 나타납니다.', { exact: true })).toBeVisible();
   await expect(page.getByRole('switch', { name: '타임라인', exact: true })).toHaveAttribute('aria-checked', 'false');
   await page.getByRole('button', { name: '이 강의 삭제' }).click(); await page.getByRole('button', { name: '강의 삭제', exact: true }).click();
@@ -55,7 +55,7 @@ test('lecture data survives Chrome closing and reopening with the same profile',
     context = await chromium.launchPersistentContext(profile, { channel: 'chrome', headless: true });
     const reopened = context.pages()[0]; await reopened.goto(baseURL!);
     await reopened.getByRole('button', { name: '내 강의', exact: false }).first().click();
-    await reopened.getByRole('button', { name: /경제학 첫걸음/ }).click();
+    await reopened.getByRole('button', { name: /경제학 첫걸음.*강의 열기/ }).click();
     await expect(reopened.getByText('브라우저를 다시 열어도 남는 자막입니다.', { exact: true })).toBeVisible();
   } finally {
     await context.close();
@@ -179,7 +179,7 @@ for (const failure of ['worker-error', 'character-loop'] as const) test(`rejecte
   expect(saved.transcripts).toBe(0); expect(saved.status).toBe('interrupted'); expect(saved.sessionCount).toBe(1);
   await expect(page.locator('.queue-banner')).toHaveCount(0);
   await page.reload(); await page.getByRole('button', { name: '내 강의', exact: false }).first().click();
-  await page.getByRole('button', { name: /korean/ }).click();
+  await page.getByRole('button', { name: /korean.*강의 열기/ }).click();
   await expect(page.getByText(warning, { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '저장된 구간 다시 처리' })).toBeVisible();
   if (failure === 'character-loop') {
@@ -242,7 +242,8 @@ test('background tab saves audio and static scenes; mini window controls capture
   await expect(page.locator('.capture-panel')).toBeVisible();
   await page.getByRole('button', { name: '계속 녹화' }).click();
   await page.getByText('녹화 중 촬영 설정 변경', { exact: true }).click();
-  await page.getByRole('switch', { name: '무음 자동 종료·저장', exact: true }).check();
+  await page.getByRole('switch', { name: '무음 자동 종료·저장', exact: true }).click();
+  await expect(page.getByRole('switch', { name: '무음 자동 종료·저장', exact: true })).toBeChecked();
   await page.getByLabel('무음 자동 종료 시간 (분)', { exact: true }).fill('1');
   await expect(page.locator('.capture-panel')).toHaveCount(0, { timeout: 15000 });
   await expect(page.getByText('1분 동안 입력 오디오가 무음으로 감지되어 자동 종료하고 저장했습니다.', { exact: true }).first()).toBeVisible();

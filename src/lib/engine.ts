@@ -1,6 +1,7 @@
 import * as db from './db';
 import type { EngineState, Settings, Transcript } from '../types';
 import { transcriptionIssue } from './speech';
+import { measuredRate } from './work-progress';
 export class Engine {
   private worker?: Worker;
   private running = false; private stopped = false; private preparing = false;
@@ -15,11 +16,13 @@ export class Engine {
   }
   private async request(data: object, transfer: Transferable[] = []) {
     const worker = this.getWorker();
-    return new Promise<{ chunks?: { text: string; timestamp: [number | null, number | null] }[]; device?: string }>((resolve, reject) => {
+    return new Promise<{ chunks?: { text: string; timestamp: [number | null, number | null] }[]; device?: string; inferenceMs?: number }>((resolve, reject) => {
       // Models on a CPU can take several minutes. A finite timeout allows recovery.
       const timeout = setTimeout(() => { this.worker?.terminate(); this.worker = undefined; reject(new Error('모델 처리가 15분 이상 응답하지 않았습니다. tiny 모델이나 CPU 모드로 다시 시도하세요.')); }, 15 * 60000);
       worker.onmessage = ({ data: reply }) => {
-        if (reply.type === 'progress') { this.report({ phase: 'model', message: reply.message, progress: reply.progress }); return; }
+        if (reply.type === 'progress') { this.report({ phase: reply.phase === 'inference' ? 'transcribing' : 'model', message: reply.message, progress: reply.progress }); return; }
+        if (reply.type === 'inference-start') { this.report({ phase: 'transcribing', progress: undefined, batchProcessed: 0 }); return; }
+        if (reply.type === 'asr-progress') { this.report({ phase: 'transcribing', batchProcessed: Math.max(0, Number(reply.seconds) || 0), progress: undefined }); return; }
         clearTimeout(timeout);
         if (reply.type === 'error') reject(new Error(reply.message)); else resolve(reply);
       };
@@ -50,7 +53,7 @@ export class Engine {
     } catch (e) { this.report({ error: e instanceof Error ? e.message : String(e), phase: 'idle', message: '저장된 자료는 유지됩니다. 다시 처리할 수 있어요.' }); }
     finally {
       this.running = false; this.jobs.clear();
-      this.report({ phase: 'idle', progress: undefined, sessionId: undefined }); db.changed();
+      this.report({ phase: 'idle', progress: undefined, sessionId: undefined, batchDuration: undefined, batchProcessed: undefined }); db.changed();
     }
   }
   private async loop() {
@@ -88,7 +91,7 @@ export class Engine {
         const audio = new Float32Array(chunks.reduce((s, c) => s + c.samples.length, 0));
         let offset = 0;
         for (const c of chunks) { audio.set(c.samples, offset); offset += c.samples.length; }
-        this.report({ phase: 'transcribing', sessionId: id, message: `${session.name} · ${Math.floor(chunks[0].start / 60)}분 구간의 자막을 만들고 있어요`, progress: undefined });
+        this.report({ phase: 'transcribing', sessionId: id, message: `${session.name} · ${Math.floor(chunks[0].start / 60)}분 구간의 자막을 만들고 있어요`, progress: undefined, batchDuration: duration, batchProcessed: 0 });
         try {
           const reply = await this.request({ type: 'transcribe', settings: session.settings, audio }, [audio.buffer]);
           // Validate again before committing text and releasing its source PCM.
@@ -101,6 +104,8 @@ export class Engine {
             end: Math.min(end, start + Math.max(c.timestamp[0] ?? 0, c.timestamp[1] ?? duration)), text: c.text.trim(),
           })).filter(c => c.end > c.start);
           await db.finishChunks(chunks, rows); this.report({ device: reply.device });
+          const rate = measuredRate(session.asrRate, duration, reply.inferenceMs);
+          if (rate !== undefined) await db.patchSession(id, { asrRate: rate }).catch(() => {});
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e);
           await db.failChunks(chunks, message); this.report({ error: message });

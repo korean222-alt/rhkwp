@@ -17,6 +17,7 @@ export function AnalysisPanel({ session, rows }: { session: Session; rows: Trans
   const controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
   useEffect(() => {
+    if (!key) { localStorage.removeItem('lens-ai-key'); sessionStorage.removeItem('lens-ai-key'); return; }
     if (remember) { localStorage.setItem('lens-ai-key', key); sessionStorage.removeItem('lens-ai-key'); }
     else { sessionStorage.setItem('lens-ai-key', key); localStorage.removeItem('lens-ai-key'); }
   }, [key, remember]);
@@ -40,13 +41,18 @@ export function AnalysisPanel({ session, rows }: { session: Session; rows: Trans
     <p className="muted">Claude API를 브라우저에서 직접 호출합니다. Claude 구독과 API 요금은 별도이며, 선택한 자료가 Anthropic으로 전송됩니다.</p>
     <label>Claude API 키<input type="password" value={key} autoComplete="off" placeholder="본인의 API 키" onChange={e => setKey(e.target.value)} disabled={busy} /></label>
     <label className="check"><input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} disabled={busy} /> 이 기기에 키 기억하기</label>
-    {remember && <p className="small warning-text">키가 브라우저에 평문으로 저장됩니다. 공용 PC에서는 사용하지 마세요.</p>}
+    {remember && <div className="notice warning" role="alert"><ShieldCheck size={22} /><div><strong>공용 PC에서는 키 기억하기를 켜지 마세요.</strong><p>API 키가 암호화되지 않고 이 브라우저에 남습니다. 이 PC를 쓰는 다른 사람이 키로 유료 API를 사용할 수 있습니다.</p></div></div>}
+    <button className="text-link danger" disabled={busy} onClick={() => { setKey(''); setRemember(false); localStorage.removeItem('lens-ai-key'); sessionStorage.removeItem('lens-ai-key'); }}>저장된 API 키 지우기</button>
     <label>모델 ID<input value={model} onChange={e => setModel(e.target.value)} placeholder="Claude 콘솔의 정확한 모델 ID" disabled={busy} /></label>
     <a className="text-link" href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" rel="noreferrer">현재 모델과 단가 확인 <ArrowUpRight size={14} /></a>
     <div className="form-grid"><label>시작 시각<input value={start} onChange={e => { setStart(e.target.value); setConsent(false); }} disabled={busy} /></label><label>끝 시각<input value={end} onChange={e => { setEnd(e.target.value); setConsent(false); }} disabled={busy} /></label><label>이미지 전송 상한<select value={images} onChange={e => { setImages(+e.target.value); setConsent(false); }} disabled={busy}>{[0, 1, 2, 3, 5].map(n => <option key={n} value={n}>{n === 0 ? '이미지 전송 안 함' : `최대 ${n}장`}</option>)}</select></label><label>API 호출 상한<select value={steps} onChange={e => setSteps(+e.target.value)} disabled={busy}>{[2, 4, 6].map(n => <option key={n} value={n}>최대 {n}회</option>)}</select></label></div>
     <details><summary>비용 보호 설정</summary><div className="form-grid"><label>예상 비용 상한 (USD)<input type="number" min="0.01" max="20" step="0.1" value={budget} onChange={e => setBudget(+e.target.value)} disabled={busy} /></label><label>입력 100만 토큰 / USD<input type="number" min="0.01" step="0.1" value={inputRate} onChange={e => setInputRate(+e.target.value)} disabled={busy} /></label><label>출력 100만 토큰 / USD<input type="number" min="0.01" step="0.1" value={outputRate} onChange={e => setOutputRate(+e.target.value)} disabled={busy} /></label></div></details>
-    <p className="small">초기 입력 토큰 추정 {tokens.toLocaleString()}개 · 첫 입력 + 최대 출력 추정 ${estimate.toFixed(3)}. 후속 요청은 문맥을 다시 보내므로 비용이 늘어납니다. 단가는 예시값이니 모델 단가에 맞춰 수정하세요. 실제 결제 상한은 API 계정에서도 설정하세요.</p>
-  </section><section className="panel settings-section"><h2>강의에 질문하기</h2><label className="sr-only" htmlFor="question">강의 질문</label><textarea id="question" value={question} onChange={e => setQuestion(e.target.value)} rows={4} disabled={busy} />
+    <p className="small">초기 입력 토큰 추정 {tokens.toLocaleString()}개 · 첫 입력 + 최대 출력 추정 ${estimate.toFixed(3)}. 후속 요청은 문맥을 다시 보내므로 비용이 늘어납니다. 단가는 예시값이니 모델 단가에 맞춰 수정하세요. <a href="https://platform.claude.com/docs/en/api/rate-limits#setting-your-own-spend-limit" target="_blank" rel="noreferrer">Claude 콘솔 Settings → Billing에서 월 사용 한도</a>도 설정하세요. 앱의 추정 비용 보호만으로 실제 청구 상한을 보장하지 않습니다.</p>
+  </section><section className="panel settings-section"><h2>강의에 질문하기</h2><div className="preset-buttons">{[
+    ['핵심 개념 정리', '이 강의의 핵심 개념을 정의, 예시, 근거 시각과 함께 정리해 주세요.'],
+    ['예상 문제 10개', '시험 대비 연습 문제 10개와 정답·해설을 만들어 주세요. 실제 출제 예측이 아닌 학습용 문제임을 밝히고 근거 시각을 붙여 주세요.'],
+    ['강조한 부분 찾기', '자막에서 반복하거나 중요하다고 강조한 부분을 근거 시각과 함께 찾아 주세요. 교수님의 출제 의도는 추측하지 마세요.'],
+  ].map(([title, prompt]) => <button key={title} className="button secondary" disabled={busy} onClick={() => { setQuestion(prompt); setConsent(false); }}>{title}</button>)}</div><label className="sr-only" htmlFor="question">강의 질문</label><textarea id="question" value={question} onChange={e => { setQuestion(e.target.value); setConsent(false); }} rows={4} disabled={busy} />
     <button className="text-link" onClick={() => setPreview(!preview)}><Eye size={16} /> 전송할 자막 확인 {preview ? '닫기' : ''}</button>
     {preview && <pre className="data-preview">{text || '선택한 구간의 자막이 없습니다.'}</pre>}
     <div className="notice"><ShieldCheck size={20} /><div>이 구간의 자막이 Anthropic으로 전송됩니다.{images > 0 && ` 선택한 구간의 이미지도 최대 ${images}장 전송합니다.`} 오디오와 영상 원본은 전송하지 않습니다.</div></div>
