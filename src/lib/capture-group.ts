@@ -3,7 +3,7 @@ import { Recorder, type CaptureState } from './recorder';
 import { MAX_CAPTURES, validateDisplay } from './display';
 import type { Session, Settings, SnapshotSettings } from '../types';
 
-export type ActiveCapture = { id: string; name: string; source: Session['source']; settings: Settings; state: CaptureState; busy: boolean; sourceId: string };
+export type ActiveCapture = { id: string; name: string; folderId?: string; source: Session['source']; settings: Settings; state: CaptureState; busy: boolean; sourceId: string };
 type Entry = { recorder: Recorder; value: ActiveCapture; starting: boolean; ending: boolean; ended: boolean; endReason?: string; actions: Promise<void>; pending: number };
 
 export class CaptureGroup {
@@ -41,7 +41,7 @@ export class CaptureGroup {
     try {
       const display = source instanceof File ? { sourceId: '', isTab: false } : validateDisplay(source, [...this.entries.values()].map(e => ({ ...e.value, isTab: e.value.state.isTab, hasAudio: e.value.state.hasAudio })));
       await this.holdLock(); await db.assertStorage(); await db.putSession(session); created = true;
-      const entry: Entry = { recorder: undefined!, value: { id: session.id, name: session.name, source: session.source, settings: session.settings, state: { elapsed: 0, silentSeconds: 0, level: 0, paused: false, hasAudio: false, sourceLabel: '', background: false, isTab: display.isTab }, busy: true, sourceId: display.sourceId }, starting: true, ending: false, ended: false, actions: Promise.resolve(), pending: 0 };
+      const entry: Entry = { recorder: undefined!, value: { id: session.id, name: session.name, folderId: session.folderId, source: session.source, settings: session.settings, state: { elapsed: 0, silentSeconds: 0, level: 0, paused: false, hasAudio: false, sourceLabel: '', background: false, isTab: display.isTab }, busy: true, sourceId: display.sourceId }, starting: true, ending: false, ended: false, actions: Promise.resolve(), pending: 0 };
       entry.recorder = new Recorder(session, state => { entry.value.state = state; if (this.entries.has(session.id)) this.emit(); }, reason => {
         entry.ended = true; entry.endReason = reason;
         if (!entry.starting) void this.stop(session.id, reason);
@@ -78,5 +78,9 @@ export class CaptureGroup {
   async update(id: string, patch: Partial<SnapshotSettings>) {
     const e = this.entries.get(id); if (!e) return;
     await this.action(e, async () => { await e.recorder.updateSnapshots(patch); e.value.settings = { ...e.value.settings, ...patch }; });
+  }
+  async updateInfo(id: string, patch: { name?: string; folderId?: string }) {
+    const e = this.entries.get(id); if (!e) return;
+    await this.action(e, async () => { await db.updateSessionInfo(id, patch); Object.assign(e.value, patch); if (patch.name) e.value.name = patch.name.trim().slice(0, 100); });
   }
 }

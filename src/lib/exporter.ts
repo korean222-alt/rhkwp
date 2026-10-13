@@ -3,11 +3,9 @@ import * as db from './db';
 import { combined, frameFile } from './cues';
 import { time } from './time';
 import { plain, srt } from './transcript';
+import { download } from './download';
+export { download } from './download';
 export { plain, srt } from './transcript';
-export function download(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob); const a = document.createElement('a');
-  a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
-}
 export function safeName(name: string) { return name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 80) || 'lecture'; }
 type FileWindow = Window & { showSaveFilePicker?: (o: object) => Promise<{ createWritable(): Promise<WritableStream<Uint8Array>> }> };
 export async function exportZip(id: string, onProgress: (p: number) => void) {
@@ -45,7 +43,7 @@ export async function exportZip(id: string, onProgress: (p: number) => void) {
     add('transcript.txt', strToU8(plain(rows, session.showTimeline !== false))); add('transcript.srt', strToU8(srt(rows)));
     add('combined.md', strToU8(combined(session.name, rows, metas, session.settings.keywords, images, session.showTimeline !== false)));
     add('scenes.json', strToU8(JSON.stringify(scenes, null, 2)));
-    add('meta.json', strToU8(JSON.stringify({ app: 'LectureLens', version: '1.2.1', show_timeline: session.showTimeline !== false, recorded_at: new Date(session.createdAt).toISOString(), duration_sec: session.duration, source: session.source, settings: session.settings, status: session.status, storage_bytes: session.bytes, exported_at: new Date().toISOString() }, null, 2)));
+    add('meta.json', strToU8(JSON.stringify({ app: 'LectureLens', version: '1.4.0', show_timeline: session.showTimeline !== false, recorded_at: new Date(session.createdAt).toISOString(), duration_sec: session.duration, source: session.source, settings: session.settings, status: session.status, storage_bytes: session.bytes, exported_at: new Date().toISOString() }, null, 2)));
     zip.end(); await writeQueue; if (failure) throw failure;
     if (writer) await writer.close(); else download(new Blob(chunks, { type: 'application/zip' }), `${root}.zip`);
     onProgress(100);

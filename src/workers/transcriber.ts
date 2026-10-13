@@ -66,7 +66,7 @@ async function transcribe(audio: Float32Array, settings: Settings, retry = false
   // Mixed speech gets short windows and a fresh acoustic language decision.
   const windows = audioWindows(audio, settings.language === 'auto' ? 6 : retry ? 10 : 30);
   for (const part of windows) {
-    if (!hasSpeech(part.audio)) continue;
+    if (!hasSpeech(part.audio)) { self.postMessage({ type: 'asr-progress', seconds: part.start + part.audio.length / 16000 }); continue; }
     const language = settings.language === 'auto' ? await detectLanguage(part.audio) : settings.language;
     const duration = part.audio.length / 16000;
     const result = await transcriber!(part.audio, {
@@ -79,6 +79,7 @@ async function transcribe(audio: Float32Array, settings: Settings, retry = false
     const issue = transcriptionIssue(chunks, duration);
     if (issue) throw new SpeechQualityError(issue);
     output.push(...chunks.map(c => ({ text: c.text, timestamp: [part.start + Math.max(0, c.timestamp[0] ?? 0), part.start + Math.min(duration, c.timestamp[1] ?? duration)] as [number, number] })));
+    self.postMessage({ type: 'asr-progress', seconds: part.start + duration });
   }
   const issue = transcriptionIssue(output, audio.length / 16000);
   if (issue) throw new SpeechQualityError(issue);
@@ -93,20 +94,24 @@ self.onmessage = async ({ data }) => {
       const audio = data.audio as Float32Array;
       if (!hasSpeech(audio)) { self.postMessage({ type: 'result', chunks: [], device }); return; }
       await load(data.settings);
+      let inferenceStart = performance.now();
+      self.postMessage({ type: 'inference-start' });
       let chunks: SpeechChunk[];
       try { chunks = await transcribe(audio, data.settings); }
       catch (e) {
         if (!(e instanceof SpeechQualityError)) throw e;
-        self.postMessage({ type: 'progress', message: '반복 오류를 감지해 짧은 구간으로 다시 인식합니다.' });
+        self.postMessage({ type: 'progress', phase: 'inference', message: '반복 오류를 감지해 짧은 구간으로 다시 인식합니다.' });
+        self.postMessage({ type: 'asr-progress', seconds: 0 });
         try { chunks = await transcribe(audio, data.settings, true); }
         catch (retryError) {
           if (!(retryError instanceof SpeechQualityError) || device !== 'webgpu') throw retryError;
           avoidGpu = true; await load({ ...data.settings, device: 'wasm' });
-          self.postMessage({ type: 'progress', message: '반복 오류가 지속되어 CPU로 다시 인식합니다.' });
+          inferenceStart = performance.now(); self.postMessage({ type: 'inference-start' });
+          self.postMessage({ type: 'progress', phase: 'inference', message: '반복 오류가 지속되어 CPU로 다시 인식합니다.' });
           chunks = await transcribe(audio, data.settings, true);
         }
       }
-      self.postMessage({ type: 'result', chunks, device });
+      self.postMessage({ type: 'result', chunks, device, inferenceMs: performance.now() - inferenceStart });
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);

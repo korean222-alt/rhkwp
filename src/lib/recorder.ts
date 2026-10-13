@@ -51,6 +51,7 @@ export class Recorder {
       this.source!.onerror = () => reject(new Error('이 파일의 코덱을 브라우저가 지원하지 않습니다. MP4(H.264/AAC), WebM 또는 WAV를 사용하세요.'));
     });
     if (!Number.isFinite(this.source.duration)) throw new Error('파일 길이를 읽을 수 없습니다. 손상되지 않은 MP4 또는 WAV 파일을 선택하세요.');
+    await patchSession(this.session.id, { expectedDuration: this.source.duration });
     this.state.hasAudio = true; this.state.sourceLabel = file.name;
     this.context = new AudioContext();
     await this.setup(this.context.createMediaElementSource(this.source));
